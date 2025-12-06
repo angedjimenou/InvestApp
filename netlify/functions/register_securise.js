@@ -1,26 +1,15 @@
-// netlify/functions/register_securise.js
+const admin = require("firebase-admin");
 
-const admin = require('firebase-admin');
+// Initialisation Firebase Admin
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.applicationDefault(),
+    });
+}
+const db = admin.firestore();
+const auth = admin.auth();
 
-// --------------------------------------------------------
-// --- Initialisation Firebase Admin ---
-// --------------------------------------------------------
-const initializeAdmin = () => {
-    if (!admin.apps.length) {
-        const creds = process.env.FIREBASE_ADMIN_CREDENTIALS;
-        if (!creds) throw new Error("FIREBASE_ADMIN_CREDENTIALS non défini");
-        const decoded = Buffer.from(creds, 'base64').toString();
-        const serviceAccount = JSON.parse(decoded);
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
-        });
-    }
-};
-const db = () => admin.firestore();
-
-// --------------------------------------------------------
-// --- Générateur de code de parrainage ---
-// --------------------------------------------------------
+// Générateur de code de parrainage aléatoire
 function generateReferralCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let code = '';
@@ -30,107 +19,139 @@ function generateReferralCode() {
     return code;
 }
 
-// --------------------------------------------------------
-// --- Fonction principale ---
-// --------------------------------------------------------
-exports.handler = async (event) => {
+// Handler Netlify Function
+exports.handler = async (event, context) => {
     try {
-        initializeAdmin();
-
-        if (event.httpMethod !== 'POST') {
-            return { statusCode: 405, body: JSON.stringify({ error: "Méthode non autorisée" }) };
+        if (event.httpMethod !== "POST") {
+            return {
+                statusCode: 405,
+                body: JSON.stringify({ error: "Méthode non autorisée" }),
+            };
         }
 
-        const { phone, countryCode, password, inviteCode } = JSON.parse(event.body);
+        const body = JSON.parse(event.body);
 
-        if (!phone || !countryCode || !password || !inviteCode) {
-            return { statusCode: 400, body: JSON.stringify({ error: "Données manquantes." }) };
-        }
-        if (password.length < 6 || phone.length < 8 || phone.length > 10) {
-            return { statusCode: 400, body: JSON.stringify({ error: "Numéro ou mot de passe invalide." }) };
+        const { phone, countryCode, password, confirmPassword, inviteCode } = body;
+
+        // Validation côté serveur
+        if (!phone || !countryCode || !password || !confirmPassword || !inviteCode) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: "Tous les champs sont requis." }),
+            };
         }
 
-        // Vérifier code d’invitation
-        const codeRef = db().collection("referralCodes").doc(inviteCode);
+        if (password !== confirmPassword) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: "Les mots de passe ne correspondent pas." }),
+            };
+        }
+
+        if (password.length < 6) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: "Le mot de passe doit contenir au moins 6 caractères." }),
+            };
+        }
+
+        if (phone.length < 8 || phone.length > 10) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: "Numéro de téléphone invalide (8 à 10 chiffres)." }),
+            };
+        }
+
+        // Vérification du code d’invitation
+        const codeRef = db.collection("referralCodes").doc(inviteCode);
         const codeSnap = await codeRef.get();
         if (!codeSnap.exists) {
-            return { statusCode: 403, body: JSON.stringify({ error: "Code d’invitation invalide." }) };
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ error: "Code d’invitation invalide." }),
+            };
         }
         const referrerUid = codeSnap.data().userIdParrain;
 
+        // Création email fictif
         const email = `${countryCode}${phone}@investapp.local`;
 
-        // Création utilisateur Firebase Auth
+        // Création utilisateur Firebase
         let userRecord;
         try {
-            userRecord = await admin.auth().createUser({
-                email,
-                password,
-                displayName: phone,
-                phoneNumber: `${countryCode}${phone}`
-            });
+            userRecord = await auth.createUser({ email, password });
         } catch (err) {
             if (err.code === "auth/email-already-exists") {
-                return { statusCode: 403, body: JSON.stringify({ error: "Ce numéro est déjà utilisé." }) };
+                // Si déjà existant, on récupère l'UID
+                const existingUser = await auth.getUserByEmail(email);
+                userRecord = existingUser;
+            } else {
+                throw err;
             }
-            console.error("Erreur Auth:", err);
-            return { statusCode: 500, body: JSON.stringify({ error: "Erreur création utilisateur." }) };
         }
 
         const uid = userRecord.uid;
-
-        // Générer un code de parrainage unique
-        let newReferralCode, unique = false;
-        while (!unique) {
-            newReferralCode = generateReferralCode();
-            const check = await db().collection("referralCodes").doc(newReferralCode).get();
-            if (!check.exists) unique = true;
-        }
-
+        const newCode = generateReferralCode();
         const now = admin.firestore.Timestamp.now();
 
-        // Transaction Firestore pour créer tous les documents
-        await db().runTransaction(async (t) => {
-            const userRef = db().collection("users").doc(uid);
-            t.set(userRef, {
-                phone,
-                countryCode,
-                balance: 0,
-                daily: { invest: 0, referral: 0 },
-                totalRevenue: { invest: 0, referral: 0 },
-                referrerUid,
-                myReferralCode: newReferralCode,
-                firstInvestmentDone: false,
-                createdAt: now
-            });
+        // Batch Firestore
+        const batch = db.batch();
 
-            const refCodeRef = db().collection("referralCodes").doc(newReferralCode);
-            t.set(refCodeRef, { userIdParrain: uid });
-
-            const parentFilleulRef = db().collection("filleuls").doc(referrerUid);
-            const parentFilleulSnap = await t.get(parentFilleulRef);
-            const updateObject = { [uid]: { totalEarned: 0, createdAt: now } };
-
-            if (parentFilleulSnap.exists) {
-                t.update(parentFilleulRef, updateObject);
-            } else {
-                t.set(parentFilleulRef, updateObject);
-            }
-
-            t.set(db().collection("filleuls").doc(uid), {});
+        // Document user
+        const userRef = db.collection("users").doc(uid);
+        batch.set(userRef, {
+            phone: phone,
+            countryCode: countryCode,
+            balance: 0,
+            daily: { invest: 0, referral: 0 },
+            totalRevenue: { invest: 0, referral: 0 },
+            referrerUid: referrerUid,
+            myReferralCode: newCode,
+            firstInvestmentDone: false,
+            createdAt: now
         });
+
+        // Document referralCodes
+        const refCodeRef = db.collection("referralCodes").doc(newCode);
+        batch.set(refCodeRef, { userIdParrain: uid });
+
+        // Document filleuls du parrain
+        const parentFilleulRef = db.collection("filleuls").doc(referrerUid);
+        const parentFilleulSnap = await parentFilleulRef.get();
+
+        const filleulMapData = {
+            totalEarned: 0,
+            createdAt: now
+        };
+
+        const updateObject = { [uid]: filleulMapData };
+
+        if (parentFilleulSnap.exists) {
+            batch.update(parentFilleulRef, updateObject);
+        } else {
+            batch.set(parentFilleulRef, updateObject);
+        }
+
+        // Document filleuls de l’utilisateur (vide pour le moment)
+        batch.set(db.collection("filleuls").doc(uid), {});
+
+        // Commit batch
+        await batch.commit();
 
         return {
             statusCode: 200,
             body: JSON.stringify({
-                success: true,
-                uid,
-                myReferralCode: newReferralCode
-            })
+                message: "Compte créé avec succès.",
+                uid: uid,
+                referralCode: newCode
+            }),
         };
 
-    } catch (error) {
-        console.error("Erreur inscription:", error);
-        return { statusCode: 500, body: JSON.stringify({ error: "Erreur interne lors de l'inscription." }) };
+    } catch (err) {
+        console.error("Erreur inscription:", err);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "Impossible de créer le compte. Vérifiez vos informations." }),
+        };
     }
 };
