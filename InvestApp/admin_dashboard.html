@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Panel - Sabot Invest</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+<style>
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: #f0f2f5;
+        color: #333;
+        margin: 0;
+        padding: 20px;
+    }
+    .header-bg {
+        background: linear-gradient(135deg, #4B0082, #6a0dad);
+        color: #fff;
+        padding: 30px;
+        border-radius: 15px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .header-bg h1 { margin: 0; font-size: 28px; }
+    .header-bg p { margin-top: 5px; opacity: 0.8; }
+
+    /* --- Onglets --- */
+    .tab-container {
+        display: flex;
+        background: #fff;
+        border-radius: 10px;
+        padding: 5px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    }
+    .tab-btn {
+        flex: 1;
+        padding: 12px;
+        text-align: center;
+        cursor: pointer;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 14px;
+        color: #6a0dad;
+        border: none;
+        background: transparent;
+        transition: all 0.3s ease;
+    }
+    .tab-btn.active {
+        background: #6a0dad;
+        color: #fff;
+        box-shadow: 0 2px 5px rgba(106, 13, 173, 0.3);
+    }
+    .tab-content { display: none; padding: 15px 0; }
+    .tab-content.active { display: block; }
+
+    /* --- Conteneur et Boutons --- */
+    .section-box {
+        background: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+    .section-box h3 {
+        color: #4B0082;
+        border-bottom: 2px solid #f0f2f5;
+        padding-bottom: 10px;
+        margin-top: 0;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .action-btn {
+        background: linear-gradient(45deg, #2ecc71, #27ae60);
+        color: #fff;
+        border: none;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.2s;
+        width: 100%;
+        margin-top: 10px;
+    }
+    .action-btn:hover:not(:disabled) { opacity: 0.9; }
+    .action-btn:disabled { background: #ccc; cursor: not-allowed; }
+    .danger-btn {
+        background: linear-gradient(45deg, #e74c3c, #c0392b);
+    }
+
+    /* --- Feedback et Logs --- */
+    .feedback {
+        margin-top: 15px;
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 14px;
+        font-weight: 600;
+    }
+    .feedback.success { background: #e6ffe6; color: #27ae60; }
+    .feedback.error { background: #ffe6e6; color: #e74c3c; }
+    .feedback.info { background: #e6f7ff; color: #4B0082; }
+
+    .log-area {
+        height: 200px;
+        background: #333;
+        color: #0f0;
+        overflow-y: scroll;
+        padding: 10px;
+        border-radius: 5px;
+        font-family: 'Consolas', monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
+        margin-top: 15px;
+    }
+    
+    /* --- Formulaire Produit --- */
+    .form-group { margin-bottom: 15px; }
+    .form-group label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 14px; }
+    .form-group input {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        box-sizing: border-box;
+        font-size: 14px;
+    }
+    
+    /* --- Grille Stats --- */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        margin-bottom: 15px;
+        text-align: center;
+    }
+    .stat-box {
+        background: #f8f8f8;
+        padding: 15px;
+        border-radius: 10px;
+    }
+    .stat-val { font-size: 24px; font-weight: 800; color: #4B0082; margin-bottom: 5px; }
+    .stat-lbl { font-size: 12px; color: #777; text-transform: uppercase; }
+
+</style>
+</head>
+<body>
+
+<div class="header-bg">
+    <h1><i class="fas fa-screwdriver-wrench"></i> Panneau d'Administration</h1>
+    <p>Gestion manuelle des fonctions critiques de Sabot Invest.</p>
+</div>
+
+<div class="tab-container">
+    <button class="tab-btn active" data-tab="credit-tab">Crédit Quotidien</button>
+    <button class="tab-btn" data-tab="expiration-tab">Expiration Invest.</button>
+    <button class="tab-btn" data-tab="products-tab">Gestion Produits</button>
+    <button class="tab-btn" data-tab="finance-tab">Analyse Financière</button>
+</div>
+
+<div id="credit-tab" class="tab-content active">
+    <div class="section-box">
+        <h3><i class="fas fa-coins"></i> Lancement du Crédit Quotidien (00h)</h3>
+        <p>Cette action parcourt tous les utilisateurs, crédite leur balance du total de `daily.invest` + `daily.referral`, met à jour les totaux (`totalRevenue`), et distribue le 1% de gain aux parrains.</p>
+        <button id="runCreditBtn" class="action-btn">Lancer la Créditation Globale</button>
+        <div id="creditFeedback" class="feedback info">Prêt à créditer.</div>
+        <div class="log-area" id="creditLog"></div>
+    </div>
+</div>
+
+<div id="expiration-tab" class="tab-content">
+    <div class="section-box">
+        <h3><i class="fas fa-clock"></i> Expiration des Investissements</h3>
+        <p>Vérifie et expire manuellement les investissements dont la date de fin (`endDate`) est passée, en ajustant les revenus quotidiens (`daily.invest` et `daily.referral` pour les parrains).</p>
+        <button id="runExpirationBtn" class="action-btn danger-btn">Vérifier et Expirer</button>
+        <div id="expirationFeedback" class="feedback info">Prêt à vérifier les expirations.</div>
+        <div class="log-area" id="expirationLog"></div>
+    </div>
+</div>
+
+<div id="products-tab" class="tab-content">
+    <div class="section-box">
+        <h3><i class="fas fa-server"></i> Ajouter un Nouveau Produit</h3>
+        <form id="addProductForm">
+            <div class="form-group"><label for="prodName">Nom (ex: Machine Lv5)</label><input type="text" id="prodName" required></div>
+            <div class="form-group"><label for="prodPrice">Prix (F)</label><input type="number" id="prodPrice" required min="100"></div>
+            <div class="form-group"><label for="prodRevenue">Revenu Quotidien (F)</label><input type="number" id="prodRevenue" required min="1"></div>
+            <div class="form-group"><label for="prodDuration">Durée (Jours)</label><input type="number" id="prodDuration" required min="1"></div>
+            <div class="form-group"><label for="prodDescription">Description</label><input type="text" id="prodDescription" required></div>
+            <button type="submit" class="action-btn" style="background: linear-gradient(45deg, #6a0dad, #8e44ad);">Ajouter le Produit</button>
+        </form>
+        <div id="productFeedback" class="feedback info">Ajouter un produit.</div>
+    </div>
+</div>
+
+<div id="finance-tab" class="tab-content">
+    <div class="section-box">
+        <h3><i class="fas fa-hand-holding-dollar"></i> Engagement Financier (Retraits)</h3>
+        <p>Calcule l'engagement total de l'entreprise si tous les utilisateurs avec un solde $\ge$ F 1000 retirent leurs fonds (Frais de 10% appliqués).</p>
+        <button id="runFinanceBtn" class="action-btn" style="background: linear-gradient(45deg, #f1c40f, #f39c12);">Actualiser l'Analyse</button>
+        
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-val" id="eligibleUsers">-</div>
+                <div class="stat-lbl">Utilisateurs Éligibles (Solde $\ge$ F 1000)</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-val" id="totalEligibleBalance">-</div>
+                <div class="stat-lbl">Solde Total Éligible</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-val" id="totalFees">-</div>
+                <div class="stat-lbl">Total des Frais (10%)</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-val" id="netCommitment">-</div>
+                <div class="stat-lbl">Engagement Net de l'Entreprise (0.9x)</div>
+            </div>
+        </div>
+        <div id="financeFeedback" class="feedback info">Cliquez pour lancer l'analyse.</div>
+    </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+// --- CONFIGURATION FIREBASE (REPRISE DE VOS FICHIERS) ---
+const firebaseConfig = {
+    apiKey: "AIzaSyDya4uWqXv_R7qjrBT4f3YlUr6mMarjgYo",
+    authDomain: "investapp-1818c.firebaseapp.com",
+    projectId: "investapp-1818c",
+    storageBucket: "investapp-1818c.firebasestorage.app",
+    messagingSenderId: "416640904710",
+    appId: "1:416640904710:web:a810b7ed5b8bd41d9c9d87"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+// --- ELEMENTS DOM ---
+const creditBtn = document.getElementById('runCreditBtn');
+const creditFeedback = document.getElementById('creditFeedback');
+const creditLog = document.getElementById('creditLog');
+const expirationBtn = document.getElementById('runExpirationBtn');
+const expirationFeedback = document.getElementById('expirationFeedback');
+const expirationLog = document.getElementById('expirationLog');
+const addProductForm = document.getElementById('addProductForm');
+const productFeedback = document.getElementById('productFeedback');
+
+const financeBtn = document.getElementById('runFinanceBtn');
+const financeFeedback = document.getElementById('financeFeedback');
+const eligibleUsersDiv = document.getElementById('eligibleUsers');
+const totalEligibleBalanceDiv = document.getElementById('totalEligibleBalance');
+const totalFeesDiv = document.getElementById('totalFees');
+const netCommitmentDiv = document.getElementById('netCommitment');
+
+// --- FONCTIONS UTILITAIRES ---
+function log(area, message) {
+    area.innerHTML += `[${new Date().toLocaleTimeString('fr-FR')}] ${message}\n`;
+    area.scrollTop = area.scrollHeight;
+}
+function setFeedback(element, message, type = 'info') {
+    element.className = `feedback ${type}`;
+    element.innerText = message;
+}
+function formatFr(number) {
+    return `F ${Math.round(number).toLocaleString('fr-FR')}`;
+}
+
+// --- GESTION DES ONGLETS ---
+document.querySelectorAll('.tab-btn').forEach(button => {
+    button.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+        
+        button.classList.add('active');
+        document.getElementById(button.dataset.tab).classList.add('active');
+    });
+});
+
+// --- LOGIQUE AUTHENTIFICATION (Simplifiée pour l'Admin Panel) ---
+auth.onAuthStateChanged(user => {
+    if (!user) {
+        // En prod, ceci devrait diriger vers une page de login admin sécurisée.
+        // Pour ce POC, nous allons utiliser une fausse authentification.
+        // alert("Authentification Admin requise. Redirection vers un login simulé.");
+        // window.location.href = "admin_login.html"; 
+    } else {
+        setFeedback(creditFeedback, `Connecté en tant que ${user.uid}. Prêt à gérer.`);
+    }
+});
+
+
+// --- 1. FONCTION DE CRÉDIT QUOTIDIEN ---
+creditBtn.addEventListener('click', async () => {
+    creditBtn.disabled = true;
+    creditLog.innerHTML = '';
+    setFeedback(creditFeedback, 'Lancement de la créditation...', 'info');
+    log(creditLog, 'Début de l\'opération de créditation globale.');
+
+    try {
+        // Récupérer tous les utilisateurs
+        const usersSnap = await db.collection('users').get();
+        log(creditLog, `Trouvé ${usersSnap.size} utilisateurs à traiter.`);
+        
+        let usersProcessed = 0;
+
+        for (const userDoc of usersSnap.docs) {
+            const userData = userDoc.data();
+            const uid = userDoc.id;
+            const investDaily = userData.daily?.invest || 0;
+            const referralDaily = userData.daily?.referral || 0;
+            const totalCredit = investDaily + referralDaily;
+            
+            if (totalCredit <= 0) {
+                log(creditLog, `[${uid}] : Solde quotidien nul. Ignoré.`);
+                continue;
+            }
+
+            const batch = db.batch();
+            const userRef = db.collection('users').doc(uid);
+            
+            // 1. Créditer la balance et mettre à jour les totaux
+            batch.update(userRef, {
+                balance: firebase.firestore.FieldValue.increment(totalCredit),
+                "totalRevenue.invest": firebase.firestore.FieldValue.increment(investDaily),
+                "totalRevenue.referral": firebase.firestore.FieldValue.increment(referralDaily),
+            });
+            
+            // 2. Créer deux transactions distinctes (log)
+            if (investDaily > 0) {
+                batch.set(db.collection('transactions').doc(), {
+                    uid: uid,
+                    type: "internal",
+                    category: "investment",
+                    amount: investDaily,
+                    direction: "credit",
+                    source: "DailyInvest",
+                    target: "Balance",
+                    details: "Revenu journalier investissement",
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            if (referralDaily > 0) {
+                batch.set(db.collection('transactions').doc(), {
+                    uid: uid,
+                    type: "internal",
+                    category: "referral",
+                    amount: referralDaily,
+                    direction: "credit",
+                    source: "DailyReferral",
+                    target: "Balance",
+                    details: "Revenu journalier parrainage (cascade)",
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            // 3. incrementation de 1% au parrain (total earned)
+            if (userData.referrerUid) {
+                const onePercent = Math.round(investDaily * 0.01) + referralDaily;
+                if (onePercent > 0) {
+                   
+                    const filleulMapRef = db.collection("filleuls").doc(userData.referrerUid);
+                    
+                   
+                    
+                    // Incrémenter totalEarned dans la Map du Filleul chez le Parrain
+                    batch.update(filleulMapRef, {
+                        [`${uid}.totalEarned`]: firebase.firestore.FieldValue.increment(onePercent)
+                    });
+
+                    
+                }
+            } else {
+                 log(creditLog, `[${uid}] : Crédité de ${formatFr(totalCredit)}. Pas de parrain.`);
+            }
+
+            await batch.commit();
+            usersProcessed++;
+        }
+
+        setFeedback(creditFeedback, `✅ Succès ! ${usersProcessed} utilisateurs crédités.`, 'success');
+        log(creditLog, 'Opération terminée avec succès.');
+
+    } catch (e) {
+        console.error("Erreur Crédit Quotidien:", e);
+        setFeedback(creditFeedback, `❌ Erreur : ${e.message}`, 'error');
+        log(creditLog, `ERREUR MAJEURE: ${e.message}`);
+    } finally {
+        creditBtn.disabled = false;
+    }
+});
+
+
+// --- 2. FONCTION D'EXPIRATION DES INVESTISSEMENTS ---
+expirationBtn.addEventListener('click', async () => {
+    expirationBtn.disabled = true;
+    expirationLog.innerHTML = '';
+    setFeedback(expirationFeedback, 'Recherche des investissements expirés...', 'info');
+    log(expirationLog, 'Début de la vérification des expirations.');
+
+    try {
+        const today = new Date();
+        // Récupérer les investissements actifs dont la date de fin est antérieure ou égale à aujourd'hui
+        const expiredSnap = await db.collection('investments')
+            .where('status', '==', 'active')
+            .where('endDate', '<=', today)
+            .get();
+
+        log(expirationLog, `Trouvé ${expiredSnap.size} investissements à expirer.`);
+
+        for (const investDoc of expiredSnap.docs) {
+            const investData = investDoc.data();
+            const investRef = investDoc.ref;
+            const uid = investData.userId;
+            const dailyRevenue = investData.dailyRevenue;
+
+            // Décrémenter le daily.invest de l'utilisateur
+            const userRef = db.collection('users').doc(uid);
+            
+            const userSnap = await userRef.get();
+            if(!userSnap.exists) {
+                log(expirationLog, `[${investDoc.id}] : Utilisateur ${uid} non trouvé. Mise à jour de l'invest expiré à la place.`);
+                await investRef.update({ status: 'expired' });
+                continue;
+            }
+            const userData = userSnap.data();
+
+            // --- Logique de décrémentation ---
+            const batch = db.batch();
+            
+            // 1. Décrémenter daily.invest de l'utilisateur
+            batch.update(userRef, {
+                "daily.invest": firebase.firestore.FieldValue.increment(-dailyRevenue)
+            });
+            
+            // 2. Mettre à jour le statut de l'investissement
+            batch.update(investRef, {
+                status: 'expired',
+                expirationDate: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            log(expirationLog, `[${investDoc.id}] : Expire. Daily invest de ${uid} réduit de ${dailyRevenue} F.`);
+            
+            // 3. Décrémenter daily.referral des parrains (1% en cascade)
+            let currentFilleulData = userData;
+            let parrainUid = currentFilleulData.referrerUid;
+            let levels = 0;
+            const MAX_LEVELS = 5; 
+            const decreaseAmount = Math.round(dailyRevenue * 0.01); // 1% du revenu journalier du produit
+
+            if (decreaseAmount > 0) {
+                while (parrainUid && levels < MAX_LEVELS) {
+                    const parrainRef = db.collection("users").doc(parrainUid);
+                    const parrainSnap = await parrainRef.get(); // On lit en dehors du batch
+                    
+                    if (!parrainSnap.exists) break;
+                    
+                    // MODIFICATION CRITIQUE : AJOUT AU BATCH
+                    batch.update(parrainRef, {
+                        "daily.referral": firebase.firestore.FieldValue.increment(-decreaseAmount)
+                    });
+                    
+                    log(expirationLog, `   -> Niv ${levels + 1}: Daily referral de ${parrainUid} ajouté au Batch (-${decreaseAmount} F).`);
+
+                    // Avancer au niveau suivant
+                    parrainUid = parrainSnap.data().referrerUid;
+                    levels++;
+                }
+            }
+            
+            // Exécution du batch (utilisateur, investissement, ET tous les parrains)
+            await batch.commit();
+        }
+
+        setFeedback(expirationFeedback, `✅ Succès ! ${expiredSnap.size} investissements expirés.`, 'success');
+        log(expirationLog, 'Opération terminée avec succès.');
+
+    } catch (e) {
+        console.error("Erreur Expiration Investissement:", e);
+        setFeedback(expirationFeedback, `❌ Erreur : ${e.message}`, 'error');
+        log(expirationLog, `ERREUR MAJEURE: ${e.message}`);
+    } finally {
+        expirationBtn.disabled = false;
+    }
+});
+
+
+// --- 3. FONCTION D'AJOUT DE PRODUIT ---
+addProductForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = addProductForm.querySelector('button');
+    btn.disabled = true;
+    setFeedback(productFeedback, 'Ajout du produit en cours...', 'info');
+
+    try {
+        const prodData = {
+            name: document.getElementById('prodName').value,
+            price: parseInt(document.getElementById('prodPrice').value),
+            dailyRevenue: parseInt(document.getElementById('prodRevenue').value),
+            durationDays: parseInt(document.getElementById('prodDuration').value),
+            description: document.getElementById('prodDescription').value,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        await db.collection('products').add(prodData);
+        setFeedback(productFeedback, `✅ Produit "${prodData.name}" ajouté avec succès !`, 'success');
+        addProductForm.reset();
+
+    } catch (e) {
+        console.error("Erreur Ajout Produit:", e);
+        setFeedback(productFeedback, `❌ Erreur : ${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+    }
+});
+
+
+// --- 4. FONCTION D'ANALYSE FINANCIÈRE ---
+financeBtn.addEventListener('click', async () => {
+    financeBtn.disabled = true;
+    setFeedback(financeFeedback, 'Calcul de l\'engagement en cours...', 'info');
+
+    try {
+        const MIN_WITHDRAWAL = 1000;
+        const FEES_RATE = 0.10;
+
+        const usersSnap = await db.collection('users').get();
+        let eligibleUsersCount = 0;
+        let totalEligibleBalance = 0;
+
+        usersSnap.forEach(doc => {
+            const balance = doc.data().balance || 0;
+            if (balance >= MIN_WITHDRAWAL) {
+                eligibleUsersCount++;
+                totalEligibleBalance += balance;
+            }
+        });
+
+        const totalFees = totalEligibleBalance * FEES_RATE;
+        const netCommitment = totalEligibleBalance - totalFees;
+
+        eligibleUsersDiv.innerText = eligibleUsersCount.toLocaleString('fr-FR');
+        totalEligibleBalanceDiv.innerText = formatFr(totalEligibleBalance);
+        totalFeesDiv.innerText = formatFr(totalFees);
+        netCommitmentDiv.innerText = formatFr(netCommitment);
+
+        setFeedback(financeFeedback, `✅ Analyse terminée. L'engagement net est de ${formatFr(netCommitment)}.`, 'success');
+
+    } catch (e) {
+        console.error("Erreur Analyse Financière:", e);
+        eligibleUsersDiv.innerText = '-';
+        totalEligibleBalanceDiv.innerText = '-';
+        totalFeesDiv.innerText = '-';
+        netCommitmentDiv.innerText = '-';
+        setFeedback(financeFeedback, `❌ Erreur : ${e.message}`, 'error');
+    } finally {
+        financeBtn.disabled = false;
+    }
+});
+
+// Lancer une fausse connexion pour permettre l'accès au panneau (À remplacer par une vraie sécurité en production)
+// Note: Ceci crée un utilisateur temporaire ou se connecte à un faux compte si l'email n'est pas utilisé.
+// REMPLACER `admin@sabotinvest.local` et `adminpass` avec votre VRAI compte administrateur.
+auth.signInWithEmailAndPassword("admin@sabotinvest.local", "adminpass").catch(e => {
+    // Si la connexion échoue (car le compte n'existe pas), on reste en mode non-connecté pour le POC
+    // Mais on pourrait créer le compte la première fois.
+    console.warn("Échec de la connexion Admin simulée. Poursuite en mode dégradé (Admin Panel visible mais non sécurisé).");
+});
+</script>
+
+</body>
+</html>
