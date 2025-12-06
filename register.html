@@ -129,6 +129,20 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
+// ... (après la configuration Firebase)
+
+const db = firebase.firestore();
+
+// NOUVEAU CODE : Récupérer le code d'invitation de l'URL
+const urlParams = new URLSearchParams(window.location.search);
+const inviteCodeFromUrl = urlParams.get('code');
+
+if (inviteCodeFromUrl) {
+    document.getElementById("inviteCode").value = inviteCodeFromUrl;
+    // Optionnel : Désactiver le champ pour éviter la modification
+    document.getElementById("inviteCode").disabled = true; 
+}
+
 const errorDiv = document.getElementById("error");
 const phoneInput = document.getElementById("phone");
 
