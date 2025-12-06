@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AUDIT MASTER PRO | Sabot Invest</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-dark: #050505;
+            --glass-bg: rgba(20, 20, 35, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --neon-cyan: #00f3ff;
+            --neon-pink: #ff0055;
+            --neon-green: #00ff9d;
+            --text-main: #e0e0e0;
+            --text-dim: #6e6e80;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg-dark);
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(0, 243, 255, 0.1) 0%, transparent 20%),
+                radial-gradient(circle at 90% 80%, rgba(255, 0, 85, 0.08) 0%, transparent 20%);
+            color: var(--text-main);
+            font-family: 'Rajdhani', sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* --- LAYOUT PC/DEFAULT --- */
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 20px;
+            height: calc(100vh - 40px);
+        }
+
+        /* --- PANELS (GLASSMOPRHISM) --- */
+        .panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        /* --- SIDEBAR --- */
+        .sidebar { justify-content: space-between; }
+        
+        .profile-section {
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .profile-img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: 2px solid var(--neon-cyan);
+            margin: 0 auto 10px;
+            background: #1a1a2e;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            color: var(--neon-cyan);
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.3);
+        }
+        .user-email { font-size: 0.9em; color: var(--text-dim); margin-top: 5px; word-break: break-all;}
+        .uid-badge { 
+            background: rgba(255,255,255,0.05); 
+            padding: 4px 8px; 
+            border-radius: 4px; 
+            font-family: 'JetBrains Mono', monospace; 
+            font-size: 0.75em; 
+            color: var(--neon-cyan);
+        }
+
+        .control-group { display: flex; flex-direction: column; gap: 15px; }
+        
+        .btn {
+            background: linear-gradient(90deg, rgba(0,243,255,0.1), transparent);
+            border: 1px solid var(--neon-cyan);
+            color: var(--neon-cyan);
+            padding: 15px;
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            font-size: 1.1em;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .btn:hover { background: var(--neon-cyan); color: #000; box-shadow: 0 0 20px rgba(0, 243, 255, 0.4); }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; filter: grayscale(1); }
+        
+        .btn-logout { border-color: var(--neon-pink); color: var(--neon-pink); background: linear-gradient(90deg, rgba(255,0,85,0.1), transparent); }
+        .btn-logout:hover { background: var(--neon-pink); color: #fff; box-shadow: 0 0 20px rgba(255, 0, 85, 0.4); }
+
+        /* --- CONSOLE LOG --- */
+        .console-wrapper { display:flex; flex-direction:column; flex-grow: 1; }
+        .console-panel {
+            background: #000;
+            border: 1px solid #333;
+            border-radius: 8px;
+            margin-top: 10px;
+            padding: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8em;
+            color: #0f0;
+            overflow-y: auto;
+            flex-grow: 1; /* Permet de prendre l'espace restant */
+        }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #111; padding-bottom: 2px; }
+        .log-time { color: #555; margin-right: 8px; }
+        .log-err { color: var(--neon-pink); }
+        .log-success { color: var(--neon-green); }
+
+        /* --- MAIN DASHBOARD --- */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 10px;
+        }
+        h1 { margin: 0; font-weight: 700; font-size: 2em; text-shadow: 0 0 10px rgba(0,243,255,0.3); }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.03);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid transparent;
+            transition: border-color 0.3s;
+        }
+        .stat-card:hover { border-color: var(--neon-cyan); }
+        .stat-val { font-size: 1.8em; font-weight: 700; color: #fff; }
+        .stat-label { font-size: 0.8em; color: var(--text-dim); text-transform: uppercase; }
+
+        /* --- RESULTS TABLE --- */
+        .results-area {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding-right: 5px;
+        }
+        .anomaly-card {
+            background: rgba(0,0,0,0.3);
+            border-left: 4px solid var(--text-dim);
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 0 8px 8px 0;
+            transition: transform 0.2s;
+        }
+        .anomaly-card:hover { transform: translateX(5px); background: rgba(0,0,0,0.5); }
+        
+        .anomaly-card.danger { border-color: var(--neon-pink); }
+        .anomaly-card.success { border-color: var(--neon-green); }
+        .anomaly-card.info { border-color: var(--neon-cyan); }
+
+        .card-header { display: flex; justify-content: space-between; margin-bottom: 8px; flex-wrap: wrap; }
+        .card-title { font-weight: 700; font-size: 1.1em; }
+        .card-meta { font-size: 0.85em; opacity: 0.7; font-family: 'JetBrains Mono', monospace; }
+        
+        .json-preview {
+            background: #0a0a12;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8em;
+            color: #a8a8b3;
+            overflow-x: auto;
+            margin-top: 8px;
+        }
+
+        /* SCROLLBAR */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #000; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--neon-cyan); }
+
+        /* --- MEDIA QUERY FOR MOBILE --- */
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .container {
+                grid-template-columns: 1fr; /* Passage à une seule colonne */
+                gap: 15px;
+                height: auto;
+                min-height: 100vh;
+            }
+            .panel { height: auto; min-height: 300px; }
+            .sidebar { order: 1; } /* Place la sidebar en haut */
+            .main-content { order: 2; } /* Place le contenu principal en dessous */
+            
+            .stats-grid { grid-template-columns: 1fr 1fr; } /* Deux colonnes sur mobile */
+            .console-panel { max-height: 250px; }
+            
+            /* Ajustement de la console dans la sidebar pour ne pas prendre toute la hauteur */
+            .console-wrapper { height: 250px; margin-top: 20px; } 
+            
+            .card-meta { display: block; margin-top: 5px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="panel sidebar">
+        <div>
+            <div class="profile-section">
+                <div class="profile-img"><i class="fas fa-user-astronaut"></i></div>
+                <h3 id="ui-email">Chargement...</h3>
+                <span id="ui-uid" class="uid-badge">...</span>
+            </div>
+
+            <div class="control-group">
+                <button id="btn-audit" class="btn" disabled onclick="startAudit()">
+                    <i class="fas fa-radar"></i> Lancer l'Audit
+                </button>
+                <button id="btn-clear" class="btn" style="border-color: #fff; color: #fff;" onclick="clearConsole()">
+                    <i class="fas fa-eraser"></i> Effacer Logs
+                </button>
+            </div>
+        </div>
+
+        <div class="console-wrapper">
+            <div style="margin-top:20px; font-size:0.9em; color:var(--text-dim);"><i class="fas fa-terminal"></i> Console Système</div>
+            <div id="sys-console" class="console-panel"></div>
+        </div>
+        
+        <button class="btn btn-logout" onclick="doLogout()">
+            <i class="fas fa-power-off"></i> Déconnexion
+        </button>
+    </div>
+
+    <div class="panel main-content">
+        <div class="header">
+            <h1><i class="fas fa-shield-alt" style="color:var(--neon-cyan)"></i> Centre de Contrôle</h1>
+            <div id="status-indicator" style="color:var(--neon-green)">● Système Prêt</div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-val" id="stat-users">0</div>
+                <div class="stat-label">Utilisateurs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="stat-invest">0</div>
+                <div class="stat-label">Investissements</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="stat-trans">0</div>
+                <div class="stat-label">Transactions</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val" id="stat-anomalies" style="color:var(--neon-pink)">0</div>
+                <div class="stat-label">Alertes</div>
+            </div>
+        </div>
+
+        <h3 style="border-bottom:1px solid #333; padding-bottom:10px;">Flux d'Activités & Anomalies</h3>
+        <div id="results-container" class="results-area">
+            <div style="text-align:center; margin-top:50px; opacity:0.3;">
+                <i class="fas fa-search" style="font-size:3em; margin-bottom:10px;"></i><br>
+                En attente du lancement de l'audit...
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- 1. CONFIGURATION FIREBASE ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyDya4uWqXv_R7qjrBT4f3YlUr6mMarjgYo",
+        authDomain: "investapp-1818c.firebaseapp.com",
+        projectId: "investapp-1818c",
+        storageBucket: "investapp-1818c.firebasestorage.app",
+        messagingSenderId: "416640904710",
+        appId: "1:416640904710:web:a810b7ed5b8bd41d9c9d87"
+    };
+
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // --- 2. GESTION DE LA CONSOLE UI ---
+    const consoleDiv = document.getElementById('sys-console');
+    
+    function log(msg, type = 'info') {
+        const time = new Date().toLocaleTimeString('fr-FR');
+        const line = document.createElement('div');
+        line.className = 'log-entry';
+        
+        let colorClass = '';
+        if(type === 'error') colorClass = 'log-err';
+        if(type === 'success') colorClass = 'log-success';
+
+        line.innerHTML = `<span class="log-time">[${time}]</span> <span class="${colorClass}">${msg}</span>`;
+        consoleDiv.appendChild(line);
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+    }
+
+    function clearConsole() {
+        consoleDiv.innerHTML = '';
+        log('Console effacée.', 'info');
+    }
+
+    // --- 3. GESTION DE L'ETAT (STATE) ---
+    let CURRENT_USER = null;
+    let LOCAL_STATE = {};
+
+    // Charger l'état local au démarrage
+    try {
+        const stored = localStorage.getItem('AUDIT_STATE_V1');
+        if(stored) LOCAL_STATE = JSON.parse(stored);
+        log(`État local chargé : ${Object.keys(LOCAL_STATE).length} objets suivis.`);
+    } catch(e) {
+        log('Aucun état précédent trouvé (Premier lancement).');
+    }
+
+    // --- 4. AUTHENTIFICATION (LE COEUR DU SYSTÈME) ---
+    log('Initialisation du listener Auth...', 'info');
+
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            CURRENT_USER = user;
+            // Mise à jour UI
+            document.getElementById('ui-email').innerText = user.email;
+            document.getElementById('ui-uid').innerText = user.uid;
+            
+            // Activer les boutons
+            document.getElementById('btn-audit').disabled = false;
+            document.getElementById('btn-audit').innerHTML = '<i class="fas fa-radar"></i> Lancer l\'Audit';
+            document.getElementById('status-indicator').innerText = "● Connecté & Prêt";
+            
+            log(`Authentification réussie : ${user.email}`, 'success');
+            log(`UID Admin : ${user.uid}`);
+        } else {
+            log('Utilisateur non connecté. Redirection...', 'error');
+            setTimeout(() => { window.location.href = 'audit_login.html'; }, 1500);
+        }
+    });
+
+    async function doLogout() {
+        await auth.signOut();
+        window.location.href = 'audit_login.html';
+    }
+
+    // --- 5. MOTEUR D'AUDIT ---
+// --- 6. MOTEUR D'AUDIT V7 (CORRECTION TAUX PARRAINAGE) ---
+
+function sortKeys(obj) {
+    if (typeof obj !== 'object' || obj === null) return obj;
+    if (Array.isArray(obj)) return obj.map(sortKeys);
+    return Object.keys(obj).sort().reduce((result, key) => {
+        result[key] = sortKeys(obj[key]);
+        return result;
+    }, {});
+}
+
+function deepEqual(obj1, obj2) {
+    return JSON.stringify(sortKeys(obj1)) === JSON.stringify(sortKeys(obj2));
+}
+
+async function startAudit() {
+    const btn = document.getElementById('btn-audit');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Analyse V7...';
+    
+    const resultsContainer = document.getElementById('results-container');
+    resultsContainer.innerHTML = ''; 
+    
+    let anomaliesCount = 0;
+    let reportMap = {}; 
+
+    try {
+        log('--- DÉBUT AUDIT V7 ---');
+
+        // A. CHARGEMENT
+        const collections = ['users', 'investments', 'transactions', 'products', 'filleuls'];
+        const dbData = {};
+        for(const col of collections) {
+            const snap = await db.collection(col).get();
+            dbData[col] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        }
+
+        const productsMap = {}; 
+        dbData.products.forEach(p => productsMap[p.productId || p.id] = p);
+        const txByUid = {}; 
+        dbData.transactions.forEach(tx => {
+            if(!txByUid[tx.uid]) txByUid[tx.uid] = [];
+            txByUid[tx.uid].push(tx);
+        });
+        const investmentsByUid = {}; 
+        dbData.investments.forEach(inv => {
+            if(!investmentsByUid[inv.userId]) investmentsByUid[inv.userId] = [];
+            investmentsByUid[inv.userId].push(inv);
+        });
+
+        // B. ANALYSE
+        const newState = {};
+        
+        for (const user of dbData.users) {
+            const uid = user.id;
+            newState[`users/${uid}`] = JSON.stringify(sortKeys(user));
+
+            const oldUserStr = LOCAL_STATE[`users/${uid}`];
+            if (!oldUserStr) continue; 
+            
+            const oldUser = JSON.parse(oldUserStr);
+            const newUser = user;
+
+            if (deepEqual(oldUser, newUser)) continue; 
+
+            let isValidAction = false;
+            let anomalyReason = "";
+            let severity = "danger"; 
+
+            const balanceDelta = newUser.balance - oldUser.balance;
+
+            // --- 1. ACHAT INVESTISSEMENT (Débit) ---
+            if (balanceDelta < 0) {
+                const newInvest = investmentsByUid[uid]?.find(inv => !LOCAL_STATE[`investments/${inv.id}`]);
+                if (newInvest) {
+                    const product = productsMap[newInvest.productId];
+                    if (product) {
+                        const priceMatch = (Math.abs(balanceDelta) === product.price) && (newInvest.price === product.price);
+                        const debitTx = txByUid[uid]?.find(tx => tx.direction === 'debit' && tx.amount === product.price);
+                        
+                        // Note: daily.invest change, daily.referral NON (c'est pour le parrain)
+                        const dailyInvestDelta = (newUser.daily?.invest || 0) - (oldUser.daily?.invest || 0);
+                        const dailyMatch = dailyInvestDelta === product.dailyRevenue;
+
+                        if (priceMatch && debitTx && dailyMatch) isValidAction = true;
+                        else anomalyReason = `Investissement Incohérent.`;
+                    }
+                } else {
+                     anomalyReason = `Baisse de solde (${balanceDelta}) sans nouvel investissement.`;
+                }
+            }
+
+            // --- 2. CREDITS (Bonus 15% ou Revenus) ---
+            else if (balanceDelta > 0) {
+                // Bonus 15% ?
+                const bonusTx = txByUid[uid]?.find(tx => tx.source === 'ReferralFirstInvest' && tx.amount === balanceDelta);
+                if (bonusTx) isValidAction = true;
+                
+                // Revenu Daily ?
+                const dailyTx = txByUid[uid]?.find(tx => (tx.source === 'DailyInvest' || tx.source === 'DailyReferral') && Math.abs(tx.amount - balanceDelta) < 1);
+                if (dailyTx) isValidAction = true;
+
+                if (!isValidAction) anomalyReason = `Crédit (${balanceDelta}) sans TX valide.`;
+            }
+
+            // --- 3. MISE A JOUR SANS CHANGEMENT DE SOLDE (Nouveau !) ---
+            else { // balanceDelta === 0
+                // Vérifier si c'est une mise à jour de "daily" ou "totalRevenue" (impact investissement filleul)
+                const dailyChanged = JSON.stringify(newUser.daily) !== JSON.stringify(oldUser.daily);
+                const totalChanged = JSON.stringify(newUser.totalRevenue) !== JSON.stringify(oldUser.totalRevenue);
+                
+                if (dailyChanged || totalChanged) {
+                    // C'est légitime : le potentiel de gain change quand un filleul investit
+                    isValidAction = true; 
+                } else {
+                    anomalyReason = "Modification suspecte hors solde/daily.";
+                }
+            }
+            
+            // --- C. STOCKAGE DU RAPPORT ---
+            if (!isValidAction) {
+                anomaliesCount++;
+                if (!reportMap[uid]) reportMap[uid] = { severity: 'info', logs: [] };
+                if (severity === 'danger') reportMap[uid].severity = 'danger';
+
+                reportMap[uid].logs.push({
+                    msg: anomalyReason || "Anomalie détectée.",
+                    old: oldUser,
+                    new: newUser
+                });
+            }
+        }
+
+        renderGroupedReport(reportMap);
+
+        // Sauvegarde de l'état
+        for(const col in dbData) {
+            dbData[col].forEach(d => {
+                newState[`${col}/${d.id}`] = JSON.stringify(sortKeys(d));
+            });
+        }
+        localStorage.setItem('AUDIT_STATE_V1', JSON.stringify(newState));
+        LOCAL_STATE = newState;
+
+        log(`Audit V7 terminé.`, 'success');
+        document.getElementById('stat-anomalies').innerText = anomaliesCount;
+
+    } catch (e) {
+        console.error(e);
+        log(`Erreur: ${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-radar"></i> Lancer l\'Audit';
+    }
+}
+
+function renderGroupedReport(reportMap) {
+    const container = document.getElementById('results-container');
+    const sortedUids = Object.keys(reportMap).sort((a, b) => {
+        if (reportMap[a].severity === 'danger') return -1;
+        return 1;
+    });
+
+    if (sortedUids.length === 0) {
+        container.innerHTML = '<div style="text-align:center; margin-top:50px; color:#00ff9d;"><h3><i class="fas fa-check-circle"></i> RAS.</h3></div>';
+        return;
+    }
+
+    sortedUids.forEach(uid => {
+        const group = reportMap[uid];
+        const isCritical = group.severity === 'danger';
+        const color = isCritical ? 'var(--neon-pink)' : 'var(--neon-cyan)';
+        
+        const details = document.createElement('details');
+        details.style.marginBottom = '15px'; details.style.background = 'rgba(255,255,255,0.05)'; details.style.borderRadius = '8px';
+        details.open = isCritical;
+
+        const summary = document.createElement('summary');
+        summary.style.padding = '15px'; summary.style.cursor = 'pointer'; summary.style.borderLeft = `5px solid ${color}`;
+        summary.innerHTML = `<span style="color:${color}">${isCritical ? 'CRITIQUE' : 'INFO'}</span> | USER: ${uid}`;
+
+        const content = document.createElement('div');
+        content.style.padding = '15px';
+
+        group.logs.forEach(log => {
+            const div = document.createElement('div');
+            div.innerHTML = `<div style="color:${color}; margin-bottom:5px;">${log.msg}</div><pre style="background:#111; padding:10px; font-size:0.8em">${JSON.stringify(sortKeys(log.new), null, 2)}</pre>`;
+            content.appendChild(div);
+        });
+
+        details.appendChild(summary); details.appendChild(content); container.appendChild(details);
+    });
+}
+
+
+
+    // --- 6. RENDU GRAPHIQUE (UI) ---
+    function renderCard(col, id, title, data, type = 'info', oldData = null) {
+        const container = document.getElementById('results-container');
+        
+        const div = document.createElement('div');
+        div.className = `anomaly-card ${type}`;
+        
+        let icon = 'info-circle';
+        if(type === 'success') icon = 'plus-circle';
+        if(type === 'danger') icon = 'exclamation-triangle';
+
+        let html = `
+            <div class="card-header">
+                <span class="card-title"><i class="fas fa-${icon}"></i> ${title}</span>
+                <span class="card-meta">${col.toUpperCase()} | ID: ${id.substring(0,8)}...</span>
+            </div>
+            <div style="font-size:0.9em; color:#ccc;">Données actuelles :</div>
+            <div class="json-preview">${JSON.stringify(data, null, 2)}</div>
+        `;
+
+        if (oldData) {
+            html += `
+                <div style="font-size:0.9em; color:#ccc; margin-top:5px;">Anciennes données :</div>
+                <div class="json-preview" style="color:#777">${JSON.stringify(oldData, null, 2)}</div>
+            `;
+        }
+
+        div.innerHTML = html;
+        container.appendChild(div);
+    }
+
+</script>
+</body>
+</html>
