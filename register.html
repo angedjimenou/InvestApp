@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inscription</title>
+<link rel="stylesheet" href="style.css">
+<style>
+body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(135deg, #4B0082, #800080);
+    font-family: Arial, sans-serif;
+}
+.container {
+    background: rgba(255,255,255,0.15);
+    backdrop-filter: blur(10px);
+    border-radius: 15px;
+    padding: 30px;
+    width: 90%;
+    max-width: 400px;
+    box-sizing: border-box;
+}
+h2 { text-align: center; color: #fff; margin-bottom: 20px; }
+.input-group select, 
+.input-group input,
+input[type="password"], 
+input[type="text"], 
+input[type="tel"] {
+    height: 40px;        
+    border-radius: 8px;  
+    border: none;
+    padding: 0 10px;
+    box-sizing: border-box;
+    font-size: 16px;
+}
+.input-group {
+    display: flex;
+    margin-bottom: 15px;
+}
+.input-group select {
+    width: 30%;         
+    margin-right: 5%;
+}
+.input-group input {
+    width: 65%;         
+}
+/* AJOUT POUR L'ESTHÉTIQUE DEMANDÉE */
+input[type="password"],
+input[type="text"] {
+    width: 100%;
+    margin-bottom: 15px;
+}
+
+button { 
+    width: 100%; 
+    height: 45px; 
+    border-radius: 8px; 
+    border: none; 
+    background: #6a0dad; 
+    color: #fff; 
+    font-size: 16px; 
+    cursor: pointer;
+}
+.error { color: #ffbaba; margin-bottom: 10px; display: none; font-size: 14px; }
+.link { display: block; text-align: center; margin-top: 15px; color: #fff; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="container">
+<h2>Inscription</h2>
+<div id="error" class="error"></div>
+
+<form id="registerForm">
+    <div class="input-group">
+        <select id="countryCode">
+            <option value="+229">Bénin (+229)</option>
+            <option value="+226">Burkina Faso (+226)</option>
+            <option value="+225">Côte d'Ivoire (+225)</option>
+            <option value="+223">Mali (+223)</option>
+            <option value="+228">Togo (+228)</option>
+            <option value="+237">Cameroun (+237)</option>
+            <option value="+221">Sénégal (+221)</option>
+            <option value="+224">Guinée (+224)</option>
+        </select>
+        <input type="tel" id="phone" placeholder="Numéro de téléphone" required pattern="[0-9]{8,10}" title="Entrez 8 à 10 chiffres uniquement">
+    </div>
+
+    <input type="password" id="password" placeholder="Mot de passe" required>
+    <input type="password" id="confirmPassword" placeholder="Confirmer le mot de passe" required>
+    <input type="text" id="inviteCode" placeholder="Code d’invitation" required>
+
+    <div style="margin-bottom: 15px; font-size: 14px; color: #fff;">
+        <label>
+            <input type="checkbox" id="termsCheck" style="margin-right:5px;">
+            J’accepte les <a href="contrat-utilisateur.html" target="_blank" style="color:#FFD700; text-decoration:underline;">conditions d’utilisation</a>
+        </label>
+        <br>
+        <label>
+            <input type="checkbox" id="privacyCheck" style="margin-right:5px;">
+            J’accepte la <a href="politique-confidentialite.html" target="_blank" style="color:#FFD700; text-decoration:underline;">politique de confidentialité</a>
+        </label>
+    </div>
+
+    <button type="submit">S’inscrire</button>
+</form>
+
+<a href="login.html" class="link">Déjà un compte ? Connectez-vous</a>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+// CONFIGURATION FIREBASE
+const firebaseConfig = {
+    apiKey: "AIzaSyDya4uWqXv_R7qjrBT4f3YlUr6mMarjgYo",
+    authDomain: "investapp-1818c.firebaseapp.com",
+    projectId: "investapp-1818c",
+    storageBucket: "investapp-1818c.firebasestorage.app",
+    messagingSenderId: "416640904710",
+    appId: "1:416640904710:web:a810b7ed5b8bd41d9c9d87"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const errorDiv = document.getElementById("error");
+const phoneInput = document.getElementById("phone");
+
+function generateReferralCode() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code = '';
+    for(let i=0;i<6;i++){
+        code += chars.charAt(Math.floor(Math.random()*chars.length));
+    }
+    return code;
+}
+
+phoneInput.addEventListener("input", () => {
+    const value = phoneInput.value.replace(/\D/g, "");
+    if (value.length < 8) {
+        errorDiv.innerText = "Le numéro est trop court (min 8 chiffres).";
+        errorDiv.style.display = "block";
+    } else if (value.length > 10) {
+        errorDiv.innerText = "Le numéro est trop long (max 10 chiffres).";
+        errorDiv.style.display = "block";
+    } else {
+        errorDiv.style.display = "none";
+    }
+});
+
+document.getElementById("registerForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const phone = phoneInput.value.trim();
+    const countryCode = document.getElementById("countryCode").value;
+    const password = document.getElementById("password").value;
+    const confirmPassword = document.getElementById("confirmPassword").value;
+    const inviteCode = document.getElementById("inviteCode").value.trim();
+
+    errorDiv.style.display = "none";
+
+    const termsAccepted = document.getElementById("termsCheck").checked;
+    const privacyAccepted = document.getElementById("privacyCheck").checked;
+
+    if(!termsAccepted || !privacyAccepted){
+        errorDiv.innerText = "Vous devez accepter les contrats pour continuer.";
+        errorDiv.style.display = "block";
+        return;
+    }
+
+    const submitBtn = e.target.querySelector("button[type='submit']");
+    submitBtn.disabled = true;
+    submitBtn.innerText = "Création en cours…";
+
+    if(password !== confirmPassword){
+        errorDiv.innerText = "Les mots de passe ne correspondent pas.";
+        errorDiv.style.display = "block";
+        submitBtn.disabled = false;
+        submitBtn.innerText = "S’inscrire";
+        return;
+    }
+    // Simplification des autres validations (le serveur fera la vérification finale)
+    if(password.length < 6 || phone.length < 8 || phone.length > 10){
+        errorDiv.innerText = "Vérifiez le mot de passe (min 6 car.) et le numéro de téléphone.";
+        errorDiv.style.display = "block";
+        submitBtn.disabled = false;
+        submitBtn.innerText = "S’inscrire";
+        return;
+    }
+
+    try {
+        // --- APPEL À LA FONCTION NETLIFY SÉCURISÉE ---
+        const payload = {
+            phone: phone,
+            countryCode: countryCode,
+            password: password,
+            inviteCode: inviteCode 
+        };
+        
+        const response = await fetch('/.netlify/functions/register_securise', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            
+            // Connexion après l'inscription (avec l'email généré par le serveur)
+            const email = countryCode + phone + "@investapp.local"; 
+            await auth.signInWithEmailAndPassword(email, password);
+            
+            alert(`🎉 Compte créé ! Votre code d’invitation est : ${result.myReferralCode}`);
+            window.location.href = "dashboard.html"; 
+        } else {
+            errorDiv.innerText = result.error || "Erreur de connexion au serveur.";
+            errorDiv.style.display = "block";
+        }
+
+    } catch (err) {
+        console.error("Erreur Inscription:", err);
+        errorDiv.innerText = "Erreur de connexion ou informations incorrectes.";
+        errorDiv.style.display = "block";
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerText = "S’inscrire";
+    }
+});
+</script>
+</body>
+</html>
