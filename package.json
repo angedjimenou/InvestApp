@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "firebase-admin": "^11.5.0",
-    "fedapay": "^1.8.3" 
+    "fedapay": "^1.2.5" 
   },
   "devDependencies": {
     "nodemon": "^3.0.1",
