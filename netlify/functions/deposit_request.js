@@ -1,7 +1,7 @@
 // netlify/functions/deposit_request.js
 
 const admin = require("firebase-admin");
-const { FedaPay, Transaction } = require('fedapay'); // <-- MODIFICATION CRUCIALE : Déstructuration
+const { FedaPay, Transaction } = require('fedapay'); // Déstructuration confirmée
 
 // --- Initialisation Firebase Admin (Sécurisée) ---
 if (!admin.apps.length) {
@@ -19,11 +19,10 @@ const db = admin.firestore();
 
 // --------------------------------------------------------
 // --- Initialisation FedaPay ---
+// (Déjà corrigée dans la version précédente)
 // --------------------------------------------------------
-
-// Les méthodes statiques sont maintenant accessibles via l'objet FedaPay déstructuré
 FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY); 
-FedaPay.setEnvironment('live'); // Ou 'sandbox'
+FedaPay.setEnvironment('live'); // N'oubliez pas de mettre 'sandbox' si vous testez
 
 // --------------------------------------------------------
 // --- Fonction Principale ---
@@ -40,7 +39,7 @@ exports.handler = async (event, context) => {
         return { statusCode: 400, body: JSON.stringify({ error: "Format de requête invalide." }) };
     }
 
-    const { idToken, amount, paymentMethod } = data;
+    const { idToken, amount, paymentMethod } = data; // paymentMethod est l'ID du document Firestore
 
     if (!idToken || !amount || amount <= 0 || !paymentMethod) {
         return { statusCode: 400, body: JSON.stringify({ error: "Données requises manquantes." }) };
@@ -53,24 +52,51 @@ exports.handler = async (event, context) => {
         return { statusCode: 401, body: JSON.stringify({ error: "Token d'authentification invalide." }) };
     }
     const userId = user.uid;
-
-    const transactionTitle = `Dépôt sur InvestApp`;
-    const transactionDescription = `Augmentation de solde pour ${userId}`;
     const now = admin.firestore.FieldValue.serverTimestamp();
 
     try {
-        // Création de la transaction FedaPay (Transaction est maintenant disponible)
-        const transaction = await Transaction.create({
-            description: transactionDescription,
+        // 1. Récupération des informations de la méthode de paiement
+        const methodRef = db.collection("users").doc(userId).collection("payment_methods").doc(paymentMethod);
+        const methodDoc = await methodRef.get();
+
+        if (!methodDoc.exists) {
+            return { statusCode: 404, body: JSON.stringify({ error: "Méthode de paiement non trouvée." }) };
+        }
+        const methodData = methodDoc.data();
+        const fullPhoneNumber = methodData.fullPhoneNumber; // Numéro de téléphone du client
+        const operator = methodData.operator; // ex: mtn_mobilemoney, moov_money
+        const firstName = methodData.fullName ? methodData.fullName.split(' ')[0] : 'Client';
+        const lastName = methodData.fullName ? methodData.fullName.split(' ').slice(1).join(' ') : 'Invest';
+
+
+        // 2. Détermination du mode FedaPay (crucial pour le 500)
+        // Les modes FedaPay dépendent de l'opérateur (ex: mtn_mobilemoney, moov_money).
+        // Si vous utilisez 'mtn_mobilemoney', le mode peut être 'mtn_open' ou 'mtn_mobilemoney'
+        const fedaPayMode = `${operator}_open`; // Ex: 'mtn_mobilemoney' -> 'mtn_mobilemoney_open'
+        if (fedaPayMode.includes('open')) {
+             // FedaPay aime le format "operateur_open" pour les transactions de paiement initiées
+             // depuis l'API, ou simplement le nom de l'opérateur.
+        }
+        
+        // 3. Création de la transaction FedaPay (avec tous les champs requis)
+        const transaction = await Transaction.create({ 
+            description: `Dépôt InvestApp`,
             amount: amount,
             currency: 'XOF', // Adapter selon votre monnaie
-            callback_url: process.env.DEPOSIT_CALLBACK_URL,
-            customer: {
-                // Vous pouvez ajouter plus de détails client ici
+            callback_url: process.env.DEPOSIT_CALLBACK_URL, // Assurez-vous que cette URL est correcte
+            mode: operator, // Utiliser le nom de l'opérateur (ex: 'mtn_mobilemoney')
+            customer: { // <-- CORRECTION: Détails Client
+                firstname: firstName,
+                lastname: lastName,
+                email: user.email || `${userId}@investapp.co`, // Utiliser l'email Firebase
+                phone_number: {
+                    number: fullPhoneNumber.replace(/\+\d{1,3}/, ''), // Enlever le code pays pour le format FedaPay
+                    country: fullPhoneNumber.substring(1, fullPhoneNumber.length - methodData.phoneNumber.length) || 'BJ' // Déduire le code pays
+                }
             }
         });
 
-        // Enregistrement de la transaction en attente dans Firestore
+        // 4. Enregistrement de la transaction en attente dans Firestore
         await db.collection("pending_transactions").doc(transaction.id).set({
             fedaPayId: transaction.id,
             userId: userId,
@@ -78,7 +104,8 @@ exports.handler = async (event, context) => {
             type: "deposit",
             status: "pending",
             createdAt: now,
-            paymentMethod: paymentMethod
+            paymentMethodId: paymentMethod, // L'ID du document de méthode
+            fedaPayToken: transaction.token
         });
 
         return {
@@ -92,11 +119,25 @@ exports.handler = async (event, context) => {
 
     } catch (err) {
         console.error("Erreur FedaPay ou Firebase:", err);
+        // Afficher l'erreur FedaPay au lieu du message générique
+        let errorMessage = "Erreur lors de la requête de dépôt (Serveur).";
+        if (err.httpResponse && err.httpResponse.data) {
+             // Si FedaPay retourne un message d'erreur dans le corps, l'afficher
+             try {
+                const fedaPayError = JSON.parse(err.httpResponse.data);
+                if (fedaPayError.message) errorMessage = fedaPayError.message;
+             } catch (e) {
+                 // Ignore si non JSON
+             }
+        } else if (err.message.includes('500')) {
+            errorMessage = "Erreur de connexion FedaPay (Code 500). Vérifiez les clés et les paramètres.";
+        }
+        
         return {
             statusCode: 500,
             body: JSON.stringify({
                 success: false,
-                error: "Erreur lors de la requête de dépôt (Serveur)."
+                error: errorMessage
             })
         };
     }
