@@ -21,7 +21,7 @@ const db = admin.firestore();
 // --- Initialisation FedaPay ---
 // --------------------------------------------------------
 FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY); 
-FedaPay.setEnvironment('live'); // N'oubliez pas de mettre 'sandbox' si vous testez
+FedaPay.setEnvironment('live'); 
 
 // --------------------------------------------------------
 // --- Fonction Principale ---
@@ -62,9 +62,14 @@ exports.handler = async (event, context) => {
             return { statusCode: 404, body: JSON.stringify({ error: "Méthode de paiement non trouvée en base de données." }) };
         }
         const methodData = methodDoc.data();
-        const fullPhoneNumber = methodData.fullPhoneNumber; // Ex: +2290152761079
+        const fullPhoneNumber = methodData.fullPhoneNumber; 
         const operator = methodData.operator; 
         
+        // --- Vérification de l'Opérateur ---
+        if (!operator || operator.length < 3) {
+            return { statusCode: 400, body: JSON.stringify({ error: "Opérateur de paiement invalide ou manquant dans la méthode." }) };
+        }
+
         // --- GESTION DU NOM ---
         const fullName = methodData.fullName || 'Client Invest'; 
         const nameParts = fullName.split(' ');
@@ -80,15 +85,14 @@ exports.handler = async (event, context) => {
             localNumber = localNumber.substring(1); 
         }
         
-        // 2. Enlever explicitement le code pays '229' si le numéro nettoyé commence par '229'
+        // 2. Enlever explicitement le code pays '229'
         if (localNumber.startsWith('229')) {
-            localNumber = localNumber.substring(3); // Reste: 0152761079
+            localNumber = localNumber.substring(3); 
         }
-        // localNumber est maintenant : 0152761079 (10 chiffres, avec le 0 initial)
         
         // --- GESTION DE L'EMAIL (FORCÉ) ---
         const FORCED_EMAIL = "Sylvstare12@gmail.com";
-        const customerEmail = FORCED_EMAIL; // On force l'utilisation de cet email.
+        const customerEmail = FORCED_EMAIL;
 
         // 2. Création de la transaction FedaPay 
         const transaction = await Transaction.create({ 
@@ -96,11 +100,11 @@ exports.handler = async (event, context) => {
             amount: amount,
             currency: 'XOF', 
             callback_url: process.env.DEPOSIT_CALLBACK_URL, 
-            mode: operator, // Ex: 'mtn_bj' ou 'moov_bj'
+            mode: operator, // Ex: 'mtn_bj'
             customer: { // Détails Client
                 firstname: firstName,
                 lastname: lastName,
-                email: customerEmail, // Ex: Sylvstare12@gmail.com
+                email: customerEmail, 
                 phone_number: {
                     number: localNumber, // Ex: 0152761079
                     country: countryCode, // Ex: 229
