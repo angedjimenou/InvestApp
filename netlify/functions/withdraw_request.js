@@ -3,7 +3,8 @@
 const admin = require('firebase-admin');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
-const FedaPay = require('fedapay'); // Assurez-vous d'avoir la librairie installée
+const FedaPay = require('fedapay').default || require('fedapay');
+ // Assurez-vous d'avoir la librairie installée
 
 // Initialisation de Firebase Admin SDK (CORRECTION Base64)
 if (!admin.apps.length) {
