@@ -1,9 +1,7 @@
-// netlify/functions/deposit_request.js
-
 const admin = require("firebase-admin");
 const { FedaPay, Transaction } = require('fedapay'); 
 
-// --- Initialisation Firebase Admin (Sécurisée) ---
+// --- Initialisation Firebase Admin ---
 if (!admin.apps.length) {
     const creds = process.env.FIREBASE_ADMIN_CREDENTIALS;
     if (!creds) throw new Error("Variable FIREBASE_ADMIN_CREDENTIALS non définie.");
@@ -17,16 +15,11 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-// --------------------------------------------------------
 // --- Initialisation FedaPay ---
-// --------------------------------------------------------
-FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY); 
-FedaPay.setEnvironment('live'); 
+FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY);
+FedaPay.setEnvironment(process.env.FEDAPAY_ENV || 'live'); // live ou sandbox
 
-// --------------------------------------------------------
-// --- Fonction Principale ---
-// --------------------------------------------------------
-exports.handler = async (event, context) => {
+exports.handler = async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: "Méthode non autorisée." }) };
     }
@@ -34,85 +27,67 @@ exports.handler = async (event, context) => {
     let data;
     try {
         data = JSON.parse(event.body);
-    } catch (error) {
-        return { statusCode: 400, body: JSON.stringify({ error: "Format de requête invalide." }) };
+    } catch {
+        return { statusCode: 400, body: JSON.stringify({ error: "Format JSON invalide." }) };
     }
 
-    const { idToken, amount, paymentMethod } = data; 
-
+    const { idToken, amount, paymentMethod } = data;
     if (!idToken || !amount || amount <= 0 || !paymentMethod) {
-        return { statusCode: 400, body: JSON.stringify({ error: "Données requises manquantes. (idToken, amount, paymentMethod)" }) };
+        return { statusCode: 400, body: JSON.stringify({ error: "Données manquantes (idToken, amount, paymentMethod)." }) };
     }
 
+    // --- Vérification utilisateur ---
     let user;
     try {
         user = await admin.auth().verifyIdToken(idToken);
-    } catch (error) {
-        return { statusCode: 401, body: JSON.stringify({ error: "Token d'authentification invalide." }) };
+    } catch {
+        return { statusCode: 401, body: JSON.stringify({ error: "Token invalide." }) };
     }
     const userId = user.uid;
     const now = admin.firestore.FieldValue.serverTimestamp();
 
     try {
-        // 1. Récupération des informations de la méthode de paiement
+        // --- Récupération de la méthode de paiement ---
         const methodRef = db.collection("users").doc(userId).collection("payment_methods").doc(paymentMethod);
         const methodDoc = await methodRef.get();
+        if (!methodDoc.exists) return { statusCode: 404, body: JSON.stringify({ error: "Méthode de paiement non trouvée." }) };
 
-        if (!methodDoc.exists) {
-            return { statusCode: 404, body: JSON.stringify({ error: "Méthode de paiement non trouvée en base de données." }) };
-        }
         const methodData = methodDoc.data();
-        const fullPhoneNumber = methodData.fullPhoneNumber; 
-        const operator = methodData.operator; 
-        
-        // --- Vérification de l'Opérateur ---
-        if (!operator || operator.length < 3) {
-            return { statusCode: 400, body: JSON.stringify({ error: "Opérateur de paiement invalide ou manquant dans la méthode." }) };
-        }
+        let operator = methodData.operator; // ex: "mtn_bj"
+        let phoneNumber = methodData.fullPhoneNumber;
 
-        // --- GESTION DU NOM ---
-        const fullName = methodData.fullName || 'Client Invest'; 
+        // --- Adaptation numéro pour FedaPay ---
+        if (phoneNumber.startsWith('+')) phoneNumber = phoneNumber.slice(1);
+        if (phoneNumber.startsWith('229')) phoneNumber = phoneNumber.slice(3); // retirer le code pays local
+
+        // --- Adaptation prénom/nom ---
+        const fullName = methodData.fullName || 'Client Invest';
         const nameParts = fullName.split(' ');
         const firstName = nameParts[0] || 'Client';
         const lastName = nameParts.slice(1).join(' ') || 'Invest';
 
-        // --- GESTION DU NUMÉRO DE TÉLÉPHONE (Correction confirmée) ---
-        let countryCode = '229'; 
-        let localNumber = fullPhoneNumber;
+        // --- Email forcé ---
+        const customerEmail = process.env.FORCED_EMAIL || "Sylvstare12@gmail.com";
 
-        // 1. Nettoyer le numéro: Enlever le '+'
-        if (localNumber.startsWith('+')) {
-            localNumber = localNumber.substring(1); 
-        }
-        
-        // 2. Enlever explicitement le code pays '229'
-        if (localNumber.startsWith('229')) {
-            localNumber = localNumber.substring(3); 
-        }
-        
-        // --- GESTION DE L'EMAIL (FORCÉ) ---
-        const FORCED_EMAIL = "Sylvstare12@gmail.com";
-        const customerEmail = FORCED_EMAIL;
-
-        // 2. Création de la transaction FedaPay 
-        const transaction = await Transaction.create({ 
+        // --- Création de la transaction FedaPay ---
+        const transaction = await Transaction.create({
             description: `Dépôt InvestApp`,
             amount: amount,
-            currency: 'XOF', 
-            callback_url: process.env.DEPOSIT_CALLBACK_URL, 
-            mode: operator, // Ex: 'mtn_bj'
-            customer: { // Détails Client
+            currency: 'XOF',
+            callback_url: process.env.DEPOSIT_CALLBACK_URL,
+            mode: operator,
+            customer: {
                 firstname: firstName,
                 lastname: lastName,
-                email: customerEmail, 
+                email: customerEmail,
                 phone_number: {
-                    number: localNumber, // Ex: 0152761079
-                    country: countryCode, // Ex: 229
+                    number: phoneNumber,
+                    country: '229'
                 }
             }
         });
 
-        // 3. Enregistrement de la transaction en attente dans Firestore
+        // --- Enregistrement dans Firestore ---
         await db.collection("pending_transactions").doc(transaction.id).set({
             fedaPayId: transaction.id,
             userId: userId,
@@ -120,7 +95,7 @@ exports.handler = async (event, context) => {
             type: "deposit",
             status: "pending",
             createdAt: now,
-            paymentMethodId: paymentMethod, 
+            paymentMethodId: paymentMethod,
             fedaPayToken: transaction.token
         });
 
@@ -129,34 +104,17 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({
                 success: true,
                 message: "Requête de dépôt réussie.",
-                fedaPayToken: transaction.token 
+                fedaPayToken: transaction.token
             })
         };
 
     } catch (err) {
-        console.error("Erreur FedaPay ou Firebase:", err);
-        
-        let errorMessage = "Erreur lors de la requête de dépôt (Serveur).";
-        
-        // Tente de décoder l'erreur spécifique de FedaPay
-        if (err.httpResponse && err.httpResponse.data) {
-             try {
-                const fedaPayError = JSON.parse(err.httpResponse.data);
-                if (fedaPayError.message) {
-                    errorMessage = `Erreur FedaPay : ${fedaPayError.message}`;
-                } else if (fedaPayError.errors) {
-                    errorMessage = `Erreur FedaPay : ${JSON.stringify(fedaPayError.errors)}`;
-                }
-             } catch (e) { /* Non JSON */ }
-        } else if (err.message.includes('500')) {
-             errorMessage = "Erreur interne de FedaPay. Vérifiez vos paramètres ou contactez le support FedaPay. (Code 500)";
-        }
-        
+        console.error("Erreur dépôt :", err);
         return {
             statusCode: 500,
             body: JSON.stringify({
                 success: false,
-                error: errorMessage
+                error: "Erreur serveur lors de la création du dépôt."
             })
         };
     }
