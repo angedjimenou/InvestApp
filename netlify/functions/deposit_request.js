@@ -21,7 +21,7 @@ const db = admin.firestore();
 // --- Initialisation FedaPay ---
 // --------------------------------------------------------
 FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY); 
-FedaPay.setEnvironment('live'); // Ou 'sandbox'
+FedaPay.setEnvironment('live'); // N'oubliez pas de mettre 'sandbox' si vous testez
 
 // --------------------------------------------------------
 // --- Fonction Principale ---
@@ -71,7 +71,7 @@ exports.handler = async (event, context) => {
         const firstName = nameParts[0] || 'Client';
         const lastName = nameParts.slice(1).join(' ') || 'Invest';
 
-        // 2. GESTION DU NUMÉRO DE TÉLÉPHONE (CORRIGÉ POUR FedaPay Bénin)
+        // --- GESTION DU NUMÉRO DE TÉLÉPHONE (Correction confirmée) ---
         let countryCode = '229'; 
         let localNumber = fullPhoneNumber;
 
@@ -84,32 +84,31 @@ exports.handler = async (event, context) => {
         if (localNumber.startsWith('229')) {
             localNumber = localNumber.substring(3); // Reste: 0152761079
         }
+        // localNumber est maintenant : 0152761079 (10 chiffres, avec le 0 initial)
         
-        // localNumber est maintenant : 0152761079 (10 chiffres)
-        // Nous le laissons tel quel comme FedaPay l'exige.
-        
-        // 3. Utilisation de l'email Firebase (Sécurisée)
-        const customerEmail = user.email || `${userId}@investapp.co`; 
+        // --- GESTION DE L'EMAIL (FORCÉ) ---
+        const FORCED_EMAIL = "Sylvstare12@gmail.com";
+        const customerEmail = FORCED_EMAIL; // On force l'utilisation de cet email.
 
-        // 4. Création de la transaction FedaPay 
+        // 2. Création de la transaction FedaPay 
         const transaction = await Transaction.create({ 
             description: `Dépôt InvestApp`,
             amount: amount,
             currency: 'XOF', 
             callback_url: process.env.DEPOSIT_CALLBACK_URL, 
-            mode: operator, 
+            mode: operator, // Ex: 'mtn_bj' ou 'moov_bj'
             customer: { // Détails Client
                 firstname: firstName,
                 lastname: lastName,
-                email: customerEmail,
+                email: customerEmail, // Ex: Sylvstare12@gmail.com
                 phone_number: {
-                    number: localNumber, // Ex: 0152761079 (10 chiffres, avec le 0 initial)
+                    number: localNumber, // Ex: 0152761079
                     country: countryCode, // Ex: 229
                 }
             }
         });
 
-        // 5. Enregistrement de la transaction en attente dans Firestore
+        // 3. Enregistrement de la transaction en attente dans Firestore
         await db.collection("pending_transactions").doc(transaction.id).set({
             fedaPayId: transaction.id,
             userId: userId,
