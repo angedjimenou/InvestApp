@@ -1,7 +1,7 @@
 // netlify/functions/deposit_request.js
 
 const admin = require("firebase-admin");
-const { FedaPay, Transaction } = require('fedapay'); // Déstructuration confirmée (requis pour setApiKey)
+const { FedaPay, Transaction } = require('fedapay'); 
 
 // --- Initialisation Firebase Admin (Sécurisée) ---
 if (!admin.apps.length) {
@@ -20,9 +20,8 @@ const db = admin.firestore();
 // --------------------------------------------------------
 // --- Initialisation FedaPay ---
 // --------------------------------------------------------
-// Assurez-vous que FEDAPAY_SECRET_KEY est une clé "live" ou "sandbox" selon le mode ci-dessous.
 FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY); 
-FedaPay.setEnvironment('live'); // Si vous testez, mettez 'sandbox'
+FedaPay.setEnvironment('live'); // Ou 'sandbox'
 
 // --------------------------------------------------------
 // --- Fonction Principale ---
@@ -63,57 +62,54 @@ exports.handler = async (event, context) => {
             return { statusCode: 404, body: JSON.stringify({ error: "Méthode de paiement non trouvée en base de données." }) };
         }
         const methodData = methodDoc.data();
-        const fullPhoneNumber = methodData.fullPhoneNumber; // Ex: +22997000000
-        const operator = methodData.operator; // Ex: mtn_mobilemoney, moov_money
+        const fullPhoneNumber = methodData.fullPhoneNumber; // Ex: +2290152761079
+        const operator = methodData.operator; 
         
-        // --- GESTION DU NOM (Sécurisée) ---
-        // S'assurer que fullName existe avant de le manipuler
+        // --- GESTION DU NOM ---
         const fullName = methodData.fullName || 'Client Invest'; 
         const nameParts = fullName.split(' ');
         const firstName = nameParts[0] || 'Client';
         const lastName = nameParts.slice(1).join(' ') || 'Invest';
 
-        // --- GESTION DU NUMÉRO DE TÉLÉPHONE (Sécurisée - Correction du TypeError) ---
-        // Utilisation d'une regex pour isoler le code pays du numéro local
-        const countryCodeMatch = fullPhoneNumber.match(/^\+(\d{1,4})/);
-        
-        let countryCode = '229'; // Défaut : Bénin
+        // 2. GESTION DU NUMÉRO DE TÉLÉPHONE (CORRIGÉ POUR FedaPay Bénin)
+        let countryCode = '229'; 
         let localNumber = fullPhoneNumber;
 
-        if (countryCodeMatch && countryCodeMatch[1]) {
-            // Le code pays est le chiffre après le '+'
-            countryCode = countryCodeMatch[1]; 
-            // Le numéro local est la partie restante
-            localNumber = fullPhoneNumber.substring(countryCodeMatch[0].length); 
-        } else {
-             // Si le format n'est pas +XXX..., on enlève juste le premier '+' et on assume le pays par défaut
-             if (localNumber.startsWith('+')) {
-                 localNumber = localNumber.substring(1);
-             }
+        // 1. Nettoyer le numéro: Enlever le '+'
+        if (localNumber.startsWith('+')) {
+            localNumber = localNumber.substring(1); 
         }
         
-        // Assurez-vous que l'email est rempli pour le client FedaPay
+        // 2. Enlever explicitement le code pays '229' si le numéro nettoyé commence par '229'
+        if (localNumber.startsWith('229')) {
+            localNumber = localNumber.substring(3); // Reste: 0152761079
+        }
+        
+        // localNumber est maintenant : 0152761079 (10 chiffres)
+        // Nous le laissons tel quel comme FedaPay l'exige.
+        
+        // 3. Utilisation de l'email Firebase (Sécurisée)
         const customerEmail = user.email || `${userId}@investapp.co`; 
 
-        // 2. Création de la transaction FedaPay (avec tous les champs requis)
+        // 4. Création de la transaction FedaPay 
         const transaction = await Transaction.create({ 
             description: `Dépôt InvestApp`,
             amount: amount,
             currency: 'XOF', 
-            callback_url: process.env.DEPOSIT_CALLBACK_URL, // Doit être configuré sur Netlify
-            mode: operator, // Ex: 'mtn_mobilemoney' (FedaPay gère la redirection)
+            callback_url: process.env.DEPOSIT_CALLBACK_URL, 
+            mode: operator, 
             customer: { // Détails Client
                 firstname: firstName,
                 lastname: lastName,
                 email: customerEmail,
                 phone_number: {
-                    number: localNumber, 
-                    country: countryCode, 
+                    number: localNumber, // Ex: 0152761079 (10 chiffres, avec le 0 initial)
+                    country: countryCode, // Ex: 229
                 }
             }
         });
 
-        // 3. Enregistrement de la transaction en attente dans Firestore
+        // 5. Enregistrement de la transaction en attente dans Firestore
         await db.collection("pending_transactions").doc(transaction.id).set({
             fedaPayId: transaction.id,
             userId: userId,
@@ -130,7 +126,7 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({
                 success: true,
                 message: "Requête de dépôt réussie.",
-                fedaPayToken: transaction.token // Jeton utilisé par le frontend
+                fedaPayToken: transaction.token 
             })
         };
 
@@ -139,26 +135,18 @@ exports.handler = async (event, context) => {
         
         let errorMessage = "Erreur lors de la requête de dépôt (Serveur).";
         
-        // Tente de décoder l'erreur spécifique de FedaPay (si elle existe)
+        // Tente de décoder l'erreur spécifique de FedaPay
         if (err.httpResponse && err.httpResponse.data) {
              try {
                 const fedaPayError = JSON.parse(err.httpResponse.data);
-                // Si FedaPay renvoie une erreur détaillée
                 if (fedaPayError.message) {
                     errorMessage = `Erreur FedaPay : ${fedaPayError.message}`;
                 } else if (fedaPayError.errors) {
-                    // Parfois FedaPay envoie un tableau d'erreurs
                     errorMessage = `Erreur FedaPay : ${JSON.stringify(fedaPayError.errors)}`;
                 }
-             } catch (e) {
-                 // Ignore si la réponse n'est pas JSON
-             }
-        } else if (err.message.includes('40')) {
-             // Erreur de client (ex: 400 Bad Request)
-             errorMessage = "Erreur de paramètres envoyés à FedaPay. (Code 4xx)";
+             } catch (e) { /* Non JSON */ }
         } else if (err.message.includes('500')) {
-             // Erreur de serveur (API FedaPay)
-             errorMessage = "Erreur interne de FedaPay. Réessayez plus tard. (Code 500)";
+             errorMessage = "Erreur interne de FedaPay. Vérifiez vos paramètres ou contactez le support FedaPay. (Code 500)";
         }
         
         return {
