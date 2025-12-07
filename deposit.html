@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Dépôt - Sabot Invest</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+<style>
+    body {
+        margin: 0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: #f0f2f5;
+        padding-bottom: 30px; 
+    }
+
+    /* Styles réutilisés */
+    .header-bg {
+        background: linear-gradient(135deg, #6a0dad, #8e44ad);
+        height: 100px;
+        border-radius: 0 0 25px 25px;
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        box-shadow: 0 3px 10px rgba(106, 13, 173, 0.2);
+    }
+    .header-title {
+        color: #fff;
+        font-size: 20px;
+        font-weight: bold;
+        padding: 0 60px; 
+        text-align: center;
+    }
+    .back-btn {
+        position: absolute;
+        left: 15px; 
+        top: 35px;
+        font-size: 20px;
+        color: #fff;
+        z-index: 10;
+    }
+
+    /* Centrage et ajustement du Conteneur */
+    .form-container {
+        width: 95%; 
+        max-width: 350px; 
+        margin: 30px auto;
+        background: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    }
+    label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: #4B0082;
+        font-size: 14px;
+    }
+    input[type="number"], select {
+        width: 100%;
+        padding: 10px 12px;
+        margin-bottom: 18px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        box-sizing: border-box;
+        font-size: 15px;
+    }
+    button {
+        width: 100%;
+        padding: 12px;
+        border: none;
+        border-radius: 6px;
+        background: linear-gradient(45deg, #2ecc71, #27ae60); /* Vert pour dépôt */
+        color: white;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background 0.3s;
+    }
+    button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+    .info-box {
+        padding: 10px;
+        background-color: #f3e5f5;
+        border: 1px solid #e0b0ff;
+        color: #4B0082;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        font-size: 14px;
+        line-height: 1.4;
+    }
+    .error {
+        color: #e74c3c;
+        margin-bottom: 15px;
+        display: none;
+        font-weight: 600;
+        text-align: center;
+    }
+    #noMethodsMessage {
+        text-align: center;
+        color: #e74c3c;
+        font-weight: bold;
+        margin-top: 10px;
+    }
+</style>
+</head>
+<body>
+
+    <div class="header-bg">
+        <a href="wallet.html" class="back-btn"><i class="fas fa-arrow-left"></i></a>
+        <div class="header-title">Effectuer un Dépôt</div>
+    </div>
+
+    <div class="form-container">
+        <div class="info-box">
+            Sélectionnez une méthode de paiement et confirmez le montant. Le paiement sera initié via FedaPay.
+        </div>
+
+        <form id="depositForm">
+            <div id="error" class="error"></div>
+            
+            <label for="paymentMethod">Moyen de Paiement Enregistré</label>
+            <select id="paymentMethod" required>
+                <option value="">Chargement des méthodes...</option>
+            </select>
+            <div id="noMethodsMessage" style="display: none;">
+                Aucune méthode trouvée. <a href="add_payment_method.html">Ajoutez-en une.</a>
+            </div>
+
+            <label for="amount">Montant à Déposer (F)</label>
+            <input type="number" id="amount" placeholder="Minimum 500 F" min="500" required>
+
+            <button type="submit" id="depositBtn" disabled>Confirmer le Dépôt</button>
+        </form>
+    </div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script>
+// Configuration Firebase (Idem que tous vos fichiers)
+const firebaseConfig = {
+    apiKey: "AIzaSyDya4uWqXv_R7qjrBT4f3YlUr6mMarjgYo",
+    authDomain: "investapp-1818c.firebaseapp.com",
+    projectId: "investapp-1818c",
+    storageBucket: "investapp-1818c.firebasestorage.app",
+    messagingSenderId: "416640904710",
+    appId: "1:416640904710:web:a810b7ed5b8bd41d9c9d87"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+auth.onAuthStateChanged(user => {
+    if(!user) return window.location.href='login.html';
+    loadPaymentMethods(user.uid);
+});
+
+async function loadPaymentMethods(uid) {
+    const select = document.getElementById("paymentMethod");
+    const noMethods = document.getElementById("noMethodsMessage");
+    const depositBtn = document.getElementById("depositBtn");
+    
+    // Vider les options de chargement
+    select.innerHTML = '<option value="">Sélectionnez un moyen de paiement</option>';
+    
+    try {
+        const methodsRef = db.collection("users").doc(uid).collection("payment_methods");
+        const snapshot = await methodsRef.get();
+
+        if (snapshot.empty) {
+            noMethods.style.display = 'block';
+            depositBtn.disabled = true;
+            return;
+        }
+
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const option = document.createElement('option');
+            option.value = doc.id; // Utiliser l'ID du document pour référence
+            option.dataset.operator = data.operator;
+            option.dataset.phone = data.fullPhoneNumber;
+            
+            // Format d'affichage : Nom (Opérateur) [Numéro]
+            option.textContent = `${data.nickname} (${data.operator.toUpperCase().replace(/_/g, ' ')})`;
+            
+            select.appendChild(option);
+        });
+        
+        depositBtn.disabled = false;
+
+    } catch (error) {
+        console.error("Erreur chargement méthodes:", error);
+        select.innerHTML = '<option value="">Erreur de chargement</option>';
+        depositBtn.disabled = true;
+    }
+}
+
+
+document.getElementById("depositForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const amount = parseInt(document.getElementById("amount").value);
+    const selectedOption = document.getElementById("paymentMethod").options[document.getElementById("paymentMethod").selectedIndex];
+    const methodId = selectedOption.value;
+    const operator = selectedOption.dataset.operator;
+    const senderPhone = selectedOption.dataset.phone; 
+    
+    const errorDiv = document.getElementById("error");
+    const depositBtn = document.getElementById("depositBtn");
+    
+    errorDiv.style.display = "none";
+
+    if (!methodId || !operator || !senderPhone) {
+        errorDiv.innerText = "Veuillez sélectionner un moyen de paiement valide.";
+        errorDiv.style.display = "block";
+        return;
+    }
+    if (amount < 500) {
+        errorDiv.innerText = "Le montant minimum de dépôt est de 500 F.";
+        errorDiv.style.display = "block";
+        return;
+    }
+
+    depositBtn.disabled = true;
+    depositBtn.innerText = "Traitement du dépôt...";
+
+    try {
+        // --- LOGIQUE SÉCURISÉE CÔTÉ SERVEUR (Netlify Function) ---
+        // Le serveur va utiliser les infos (operator/senderPhone) pour initier FedaPay
+        const payload = {
+            uid: user.uid,
+            amount: amount,
+            operator: operator, 
+            senderPhone: senderPhone,
+            methodId: methodId,
+        };
+        
+        // Ceci sera la fonction qui gère l'appel à l'API FedaPay
+        const response = await fetch('/.netlify/functions/deposit_request', { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            // FedaPay demande souvent une confirmation sur le téléphone
+            alert(`✅ Dépôt de ${amount.toLocaleString()} F initié via ${operator.toUpperCase()}. Veuillez confirmer le paiement sur votre téléphone.`);
+            window.location.href = "wallet.html"; 
+        } else {
+            errorDiv.innerText = result.error || "Erreur lors de la requête de dépôt (Serveur).";
+            errorDiv.style.display = "block";
+        }
+
+    } catch (err) {
+        console.error("Erreur Dépôt:", err);
+        errorDiv.innerText = "Erreur de connexion au serveur.";
+        errorDiv.style.display = "block";
+    } finally {
+        depositBtn.disabled = false;
+        depositBtn.innerText = "Confirmer le Dépôt";
+    }
+});
+</script>
+
+</body>
+</html>

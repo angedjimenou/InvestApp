@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Ajouter un Moyen de Paiement</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+<style>
+    body {
+        margin: 0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: #f0f2f5;
+        padding-bottom: 30px; 
+    }
+
+    /* Styles réutilisés */
+    .header-bg {
+        background: linear-gradient(135deg, #6a0dad, #8e44ad);
+        height: 100px;
+        border-radius: 0 0 25px 25px;
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        box-shadow: 0 3px 10px rgba(106, 13, 173, 0.2);
+    }
+    .header-title {
+        color: #fff;
+        font-size: 20px;
+        font-weight: bold;
+        /* Assurez-vous que le titre est bien centré et ne déborde pas */
+        padding: 0 60px; 
+        text-align: center;
+    }
+    
+    /* FIX BOUTON RETOUR - Positionné plus haut pour éviter le texte */
+    .back-btn {
+        position: absolute;
+        left: 15px; /* Décalé légèrement */
+        top: 35px; /* Plus haut que 50% */
+        font-size: 20px;
+        color: #fff;
+        z-index: 10;
+        transform: translateY(0); /* Suppression du translateY */
+    }
+
+    /* Centrage et ajustement du Conteneur */
+    .form-container {
+        width: 95%; 
+        max-width: 350px; /* Réduction pour un meilleur centrage et affichage mobile */
+        margin: 30px auto;
+        background: #fff;
+        padding: 20px; /* Padding réduit */
+        border-radius: 10px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    }
+    label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: #4B0082;
+        font-size: 14px;
+    }
+    input, select {
+        width: 100%;
+        padding: 10px 12px;
+        margin-bottom: 18px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        box-sizing: border-box;
+        font-size: 15px;
+    }
+    button {
+        width: 100%;
+        padding: 12px;
+        border: none;
+        border-radius: 6px;
+        background: linear-gradient(45deg, #f39c12, #e67e22);
+        color: white;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background 0.3s;
+    }
+    button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+    .error, .limit-message {
+        color: #e74c3c;
+        margin-bottom: 15px;
+        font-weight: 600;
+        text-align: center;
+    }
+    .limit-message {
+        color: #6a0dad;
+        background-color: #e0b0ff;
+        padding: 10px;
+        border-radius: 8px;
+    }
+
+    /* Styles spécifiques pour le champ de téléphone */
+    .phone-input-group {
+        display: flex;
+        margin-bottom: 18px;
+    }
+    #countryCodeDisplay {
+        padding: 10px 10px;
+        border: 1px solid #ccc;
+        border-right: none;
+        background-color: #eee;
+        border-radius: 6px 0 0 6px;
+        font-size: 15px;
+        font-weight: bold;
+        color: #4B0082;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: default;
+    }
+    #phoneNumber {
+        flex-grow: 1;
+        border-radius: 0 6px 6px 0 !important;
+        margin-bottom: 0 !important;
+        border-left: 1px solid #ccc !important;
+    }
+
+</style>
+</head>
+<body>
+
+    <div class="header-bg">
+        <a href="wallet.html" class="back-btn"><i class="fas fa-arrow-left"></i></a>
+        <div class="header-title">Ajouter un Moyen de Paiement</div>
+    </div>
+
+    <div class="form-container">
+        <div id="methodLimitMessage" class="limit-message" style="display: none;">
+            Vous avez atteint la limite de 3 moyens de paiement.
+        </div>
+        
+        <form id="addMethodForm">
+            <div id="error" class="error" style="display: none;"></div>
+
+            <label for="nickname">Nom de ce moyen de paiement</label>
+            <input type="text" id="nickname" placeholder="Ex: Mon MTN Personnel" required maxlength="25">
+
+            <label for="operator">Opérateur/Réseau (Via FedaPay)</label>
+            <select id="operator" required>
+                <option value="">Sélectionnez un Opérateur</option>
+                <option value="moov_bj">Moov Money (Bénin)</option>
+                <option value="mtn_bj">MTN Mobile Money (Bénin)</option>
+                <option value="moov_ci">Moov Money (Côte d'Ivoire)</option>
+                <option value="mtn_ci">MTN Mobile Money (Côte d'Ivoire)</option>
+                <option value="flooz_tg">Flooz (Togo)</option>
+                <option value="tmoney_tg">T-Money (Togo)</option>
+            </select>
+            
+            <label>Numéro de Téléphone Mobile Money</label>
+            <div class="phone-input-group">
+                <div id="countryCodeDisplay" title="Code pays non modifiable">...</div>
+                <input type="tel" id="phoneNumber" placeholder="Numéro sans le code pays" required>
+            </div>
+            
+            <label for="fullName">Nom & Prénom (pour vérification)</label>
+            <input type="text" id="fullName" placeholder="Nom et Prénom au complet" required>
+
+            <button type="submit" id="addBtn">Enregistrer le Moyen de Paiement</button>
+        </form>
+    </div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script>
+// Configuration Firebase (Idem que tous vos fichiers)
+const firebaseConfig = {
+    apiKey: "AIzaSyDya4uWqXv_R7qjrBT4f3YlUr6mMarjgYo",
+    authDomain: "investapp-1818c.firebaseapp.com",
+    projectId: "investapp-1818c",
+    storageBucket: "investapp-1818c.firebasestorage.app",
+    messagingSenderId: "416640904710",
+    appId: "1:416640904710:web:a810b7ed5b8bd41d9c9d87"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const MAX_METHODS = 3;
+
+auth.onAuthStateChanged(user => {
+    if(!user) return window.location.href='login.html';
+    checkMethodLimit(user.uid);
+    loadUserCountryCode(user.uid);
+});
+
+async function loadUserCountryCode(uid) {
+    const userRef = db.collection("users").doc(uid);
+    const userSnap = await userRef.get();
+    
+    if (userSnap.exists) {
+        const data = userSnap.data();
+        const code = data.countryCode || '+229';
+        document.getElementById("countryCodeDisplay").innerText = code;
+    } else {
+        document.getElementById("countryCodeDisplay").innerText = '+229';
+    }
+}
+
+async function checkMethodLimit(uid) {
+    const methodsRef = db.collection("users").doc(uid).collection("payment_methods");
+    const snapshot = await methodsRef.get();
+    
+    if (snapshot.size >= MAX_METHODS) {
+        document.getElementById("addMethodForm").style.display = 'none';
+        document.getElementById("methodLimitMessage").style.display = 'block';
+    } else {
+        document.getElementById("addMethodForm").style.display = 'block';
+        document.getElementById("methodLimitMessage").style.display = 'none';
+    }
+}
+
+document.getElementById("addMethodForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const nickname = document.getElementById("nickname").value.trim();
+    const operator = document.getElementById("operator").value;
+    const rawPhoneNumber = document.getElementById("phoneNumber").value.trim();
+    const countryCode = document.getElementById("countryCodeDisplay").innerText.trim();
+    const fullPhoneNumber = countryCode + rawPhoneNumber;
+    const fullName = document.getElementById("fullName").value.trim();
+    const errorDiv = document.getElementById("error");
+    const addBtn = document.getElementById("addBtn");
+
+    errorDiv.style.display = "none";
+    
+    if (!nickname || !operator || !rawPhoneNumber || !fullName) {
+        errorDiv.innerText = "Veuillez remplir tous les champs.";
+        errorDiv.style.display = "block";
+        return;
+    }
+    
+    addBtn.disabled = true;
+    addBtn.innerText = "Enregistrement en cours...";
+
+    try {
+        const methodsRef = db.collection("users").doc(user.uid).collection("payment_methods");
+        const snapshot = await methodsRef.get();
+
+        if (snapshot.size >= MAX_METHODS) {
+            errorDiv.innerText = "Limite de moyens de paiement atteinte (3).";
+            errorDiv.style.display = "block";
+            return;
+        }
+
+        const payload = {
+            uid: user.uid,
+            nickname: nickname,
+            operator: operator,
+            fullPhoneNumber: fullPhoneNumber,
+            fullName: fullName
+        };
+        
+        const response = await fetch('/.netlify/functions/add_payment_method', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            alert("✅ Moyen de paiement ajouté avec succès !");
+            window.location.href = "wallet.html"; 
+        } else {
+            errorDiv.innerText = result.error || "Erreur lors de l'enregistrement de la méthode via le serveur.";
+            errorDiv.style.display = "block";
+        }
+        
+    } catch (err) {
+        console.error("Erreur Ajout Méthode:", err);
+        errorDiv.innerText = "Erreur de connexion au serveur.";
+        errorDiv.style.display = "block";
+    } finally {
+        addBtn.disabled = false;
+        addBtn.innerText = "Enregistrer le Moyen de Paiement";
+    }
+});
+</script>
+
+</body>
+</html>

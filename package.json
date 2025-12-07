@@ -10,7 +10,8 @@
     "test": "echo \"No tests specified\" && exit 0"
   },
   "dependencies": {
-    "firebase-admin": "^11.5.0"
+    "firebase-admin": "^11.5.0",
+    "fedapay": "^2.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1",

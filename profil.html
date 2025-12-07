@@ -349,15 +349,15 @@
     }
 
     function copyLink() {
-        if(!currentReferralCode) return;
-        const link = window.location.origin + "/register.html?code=" + currentReferralCode;
-        
-        navigator.clipboard.writeText(link).then(() => {
-            showToast();
-        }).catch(err => {
-            prompt("Copiez votre lien :", link);
-        });
-    }
+    if(!currentReferralCode) return;
+    const link = window.location.origin + "/register.html?code=" + currentReferralCode; // Cette ligne est déjà correcte
+    
+    navigator.clipboard.writeText(link).then(() => {
+        showToast();
+    }).catch(err => {
+        prompt("Copiez votre lien :", link);
+    });
+}
 
     function showToast() {
         const x = document.getElementById("toast");
