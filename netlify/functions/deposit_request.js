@@ -1,100 +1,105 @@
 // netlify/functions/deposit_request.js
 
-const admin = require('firebase-admin');
-const { initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
-const FedaPay = require('fedapay').default || require('fedapay'); 
+const admin = require("firebase-admin");
+const { FedaPay, Transaction } = require('fedapay'); // <--- MODIFICATION 1 (Destructuring)
 
-// Initialisation de Firebase Admin SDK (CORRECTION Base64)
+// --- Initialisation Firebase Admin (Sécurisée) ---
 if (!admin.apps.length) {
-    // 1. Décodage de la chaîne Base64
-    const decodedServiceAccount = Buffer.from(
-        process.env.FIREBASE_ADMIN_CREDENTIALS,
-        'base64'
-    ).toString('utf8');
+    const creds = process.env.FIREBASE_ADMIN_CREDENTIALS;
+    if (!creds) throw new Error("Variable FIREBASE_ADMIN_CREDENTIALS non définie.");
 
-    // 2. Parsage du JSON décodé
-    const serviceAccount = JSON.parse(decodedServiceAccount);
-    
-    initializeApp({
+    const decodedCreds = Buffer.from(creds, 'base64').toString();
+    const serviceAccount = JSON.parse(decodedCreds);
+
+    admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
     });
 }
-const db = getFirestore();
+const db = admin.firestore();
 
-// Initialisation de FedaPay
-FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY); 
-FedaPay.setEnvironment('live'); // Remplacez par 'sandbox' si vous êtes en phase de test
+// --------------------------------------------------------
+// --- Initialisation FedaPay ---
+// --------------------------------------------------------
 
-// URL du webhook qui sera appelé par FedaPay pour confirmer le paiement
-// UTILISEZ UNE VARIABLE D'ENVIRONNEMENT NETLIFY POUR CELA
-const WEBHOOK_URL = process.env.DEPOSIT_CALLBACK_URL; 
-const DESCRIPTION = "Dépôt sur Sabot Invest";
+// Utilisez FedaPay.init() qui est plus récent et plus stable
+FedaPay.init({
+    apiKey: process.env.FEDAPAY_SECRET_KEY,
+    environment: 'live' 
+}); // <--- MODIFICATION 2 (Utilisation de init())
 
-
-exports.handler = async (event) => {
+// --------------------------------------------------------
+// --- Fonction Principale ---
+// --------------------------------------------------------
+exports.handler = async (event, context) => {
     if (event.httpMethod !== 'POST') {
-        return { statusCode: 405, body: JSON.stringify({ success: false, error: "Méthode non autorisée." }) };
+        return { statusCode: 405, body: JSON.stringify({ error: "Méthode non autorisée." }) };
     }
 
+    let data;
     try {
-        const { uid, amount, operator, senderPhone } = JSON.parse(event.body);
+        data = JSON.parse(event.body);
+    } catch (error) {
+        return { statusCode: 400, body: JSON.stringify({ error: "Format de requête invalide." }) };
+    }
 
-        if (!uid || !amount || amount < 500 || !operator || !senderPhone) {
-            return { statusCode: 400, body: JSON.stringify({ success: false, error: "Données de transaction invalides." }) };
-        }
+    const { idToken, amount, paymentMethod } = data;
 
-        if (!WEBHOOK_URL) {
-             console.error("Variable DEPOSIT_CALLBACK_URL manquante.");
-             return { statusCode: 500, body: JSON.stringify({ success: false, error: "Erreur serveur: URL de rappel de dépôt non configurée." }) };
-        }
-        
-        // 1. Appel de l'API FedaPay pour créer la transaction
-        const transaction = await FedaPay.Transaction.create({
-            description: DESCRIPTION,
+    if (!idToken || !amount || amount <= 0 || !paymentMethod) {
+        return { statusCode: 400, body: JSON.stringify({ error: "Données requises manquantes." }) };
+    }
+
+    let user;
+    try {
+        user = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+        return { statusCode: 401, body: JSON.stringify({ error: "Token d'authentification invalide." }) };
+    }
+    const userId = user.uid;
+
+    const transactionTitle = `Dépôt sur InvestApp`;
+    const transactionDescription = `Augmentation de solde pour ${userId}`;
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    try {
+        // Création de la transaction FedaPay
+        const transaction = await Transaction.create({
+            description: transactionDescription,
             amount: amount,
-            currency: { code: 'XOF' },
-            callback_url: WEBHOOK_URL, // Utilisation de la variable d'environnement
+            currency: 'XOF', // Adapter selon votre monnaie
+            callback_url: process.env.DEPOSIT_CALLBACK_URL,
             customer: {
-                phone: senderPhone 
+                // Vous pouvez ajouter plus de détails client ici
             }
         });
 
-        // 2. Enregistrement de la transaction en statut 'pending' dans Firestore
-        await db.collection("transactions").add({
-            uid: uid,
-            type: 'deposit',
+        // Enregistrement de la transaction en attente dans Firestore
+        await db.collection("pending_transactions").doc(transaction.id).set({
+            fedaPayId: transaction.id,
+            userId: userId,
             amount: amount,
-            status: 'pending',
-            operator: operator,
-            senderPhone: senderPhone,
-            fedapay_id: transaction.id, 
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
+            type: "deposit",
+            status: "pending",
+            createdAt: now,
+            paymentMethod: paymentMethod
         });
 
-        // 3. Réponse au client
-        // NOTE: FedaPay initie le paiement sur le téléphone associé au senderPhone
         return {
             statusCode: 200,
-            body: JSON.stringify({ 
-                success: true, 
-                message: "Transaction initiée",
-                // Si FedaPay vous renvoie une URL pour une étape supplémentaire, utilisez-la ici:
-                // payment_url: transaction.url 
+            body: JSON.stringify({
+                success: true,
+                message: "Requête de dépôt réussie.",
+                fedaPayToken: transaction.token // Jeton utilisé par le frontend
             })
         };
 
-    } catch (error) {
-        console.error("Erreur FedaPay ou Firestore:", error);
-        let errorMessage = "Erreur interne lors du traitement du dépôt.";
-        
-        if (error.message) {
-            errorMessage = error.message; 
-        }
-
+    } catch (err) {
+        console.error("Erreur FedaPay ou Firebase:", err);
         return {
             statusCode: 500,
-            body: JSON.stringify({ success: false, error: errorMessage })
+            body: JSON.stringify({
+                success: false,
+                error: "Erreur lors de la requête de dépôt (Serveur)."
+            })
         };
     }
 };

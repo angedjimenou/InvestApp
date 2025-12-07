@@ -1,143 +1,146 @@
 // netlify/functions/withdraw_request.js
 
 const admin = require('firebase-admin');
-const { initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
-const FedaPay = require('fedapay').default || require('fedapay');
- // Assurez-vous d'avoir la librairie installée
+const { FedaPay, Disbursement } = require('fedapay'); // <--- MODIFICATION 1 (Destructuring)
 
-// Initialisation de Firebase Admin SDK (CORRECTION Base64)
+// --- Initialisation Firebase Admin (Sécurisée) ---
 if (!admin.apps.length) {
-    // 1. Décodage de la chaîne Base64
-    const decodedServiceAccount = Buffer.from(
-        process.env.FIREBASE_ADMIN_CREDENTIALS,
-        'base64'
-    ).toString('utf8');
-
-    // 2. Parsage du JSON décodé
-    const serviceAccount = JSON.parse(decodedServiceAccount);
+    const creds = process.env.FIREBASE_ADMIN_CREDENTIALS;
+    if (!creds) throw new Error("Variable FIREBASE_ADMIN_CREDENTIALS non définie.");
     
-    initializeApp({
+    const decodedCreds = Buffer.from(creds, 'base64').toString();
+    const serviceAccount = JSON.parse(decodedCreds);
+
+    admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
     });
 }
-const db = getFirestore();
+const db = admin.firestore();
 
-// Initialisation de FedaPay (pour le décaissement)
-FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY); 
-FedaPay.setEnvironment('live'); // Ou 'sandbox'
+// --------------------------------------------------------
+// --- Initialisation FedaPay ---
+// --------------------------------------------------------
 
-const MIN_WITHDRAWAL = 1000;
-const INITIAL_INVESTMENT_KEY = 'initialInvestment'; 
-// UTILISATION DE LA VARIABLE D'ENVIRONNEMENT
-const DISBURSEMENT_CALLBACK_URL = process.env.DISBURSEMENT_CALLBACK_URL; 
+// Utilisez FedaPay.init() qui est plus récent et plus stable
+FedaPay.init({
+    apiKey: process.env.FEDAPAY_SECRET_KEY,
+    environment: 'live' 
+}); // <--- MODIFICATION 2 (Utilisation de init())
 
-exports.handler = async (event) => {
+// --------------------------------------------------------
+// --- Fonction Principale ---
+// --------------------------------------------------------
+exports.handler = async (event, context) => {
+    // 1. Vérification HTTP
     if (event.httpMethod !== 'POST') {
-        return { statusCode: 405, body: JSON.stringify({ success: false, error: "Méthode non autorisée." }) };
+        return { statusCode: 405, body: JSON.stringify({ error: "Méthode non autorisée." }) };
     }
 
+    // 2. Récupération du POST
+    let data;
     try {
-        const { uid, amount, operator, receiverPhone, methodId } = JSON.parse(event.body);
+        data = JSON.parse(event.body);
+    } catch (error) {
+        return { statusCode: 400, body: JSON.stringify({ error: "Format de requête invalide." }) };
+    }
+    
+    const { idToken, amount } = data; 
 
-        // ... [Vérification des données] ...
-        if (!uid || !amount || amount < MIN_WITHDRAWAL || !operator || !receiverPhone || !methodId) {
-            return { statusCode: 400, body: JSON.stringify({ success: false, error: "Données de retrait invalides ou montant trop bas." }) };
-        }
+    if (!idToken || !amount || amount <= 0) {
+        return { statusCode: 400, body: JSON.stringify({ error: "Montant requis manquant." }) };
+    }
 
-        if (!DISBURSEMENT_CALLBACK_URL) {
-             console.error("Variable DISBURSEMENT_CALLBACK_URL manquante.");
-             return { statusCode: 500, body: JSON.stringify({ success: false, error: "Erreur serveur: URL de rappel de décaissement non configurée." }) };
-        }
-        
-        const userRef = db.collection('users').doc(uid);
-        let transactionDocId = null; // Renommé pour plus de clarté
+    // 3. Vérification de l'utilisateur
+    let user;
+    try {
+        user = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+        return { statusCode: 401, body: JSON.stringify({ error: "Token d'authentification invalide." }) };
+    }
+    const userId = user.uid;
 
-        // --- 1. DÉDUCTION DU SOLDE ET ENREGISTREMENT DE LA REQUÊTE (TRANSACTION FIRESTORE) ---
-        await db.runTransaction(async (t) => {
-            const userSnap = await t.get(userRef);
-            if (!userSnap.exists) throw new Error("Utilisateur non trouvé.");
+    // 4. Transaction de Retrait
+    try {
+        const result = await db.runTransaction(async (t) => {
+            const userRef = db.collection('users').doc(userId);
+            const userDoc = await t.get(userRef);
             
-            const userData = userSnap.data();
+            if (!userDoc.exists) throw new Error("ERR_USER_NOT_FOUND");
+
+            const userData = userDoc.data();
             const currentBalance = userData.balance || 0;
-            const initialInvestment = userData[INITIAL_INVESTMENT_KEY] || 0; 
-            const withdrawableBalance = currentBalance - initialInvestment;
-            
-            if (withdrawableBalance < amount) {
-                throw new Error(`Solde retirable insuffisant. Disponible: ${withdrawableBalance.toLocaleString('fr-FR')} F`);
-            }
-            
-            // Déduction du solde
             const newBalance = currentBalance - amount;
-            t.update(userRef, { balance: newBalance });
 
-            // Enregistrement initial de la transaction (avant l'appel FedaPay)
-            const newTransactionRef = db.collection("transactions").doc();
+            if (newBalance < 0) throw new Error("ERR_INSUFFICIENT_FUNDS");
+
+            const now = admin.firestore.FieldValue.serverTimestamp();
             
-            t.set(newTransactionRef, {
-                uid: uid,
-                type: 'withdrawal',
+            // Étape 1: Créer le décaissement (Disbursement) via FedaPay
+            // Note: Le montant est en XOF, currency doit correspondre à FedaPay.
+            const disbursement = await Disbursement.create({
                 amount: amount,
-                status: 'deducted_pending_disbursement', 
-                operator: operator,
-                receiverPhone: receiverPhone,
-                methodId: methodId,
-                createdAt: admin.firestore.FieldValue.serverTimestamp()
+                currency: 'XOF', 
+                // Assurez-vous que l'ID de la méthode de paiement est bien dans les données utilisateur
+                payment_method_id: userData.paymentMethodId, 
+                callback_url: process.env.DISBURSEMENT_CALLBACK_URL,
             });
 
-            // Enregistre l'ID du document pour l'utiliser si l'appel FedaPay échoue
-            transactionDocId = newTransactionRef.id;
+            // Étape 2: Débit du solde dans Firestore
+            t.update(userRef, {
+                balance: newBalance,
+                updatedAt: now,
+            });
+
+            // Étape 3: Enregistrement de la transaction en attente de décaissement
+            t.set(db.collection("pending_disbursements").doc(disbursement.id), {
+                fedaPayId: disbursement.id,
+                userId: userId,
+                amount: amount,
+                status: 'pending',
+                createdAt: now,
+                updatedAt: now,
+            });
+            
+            // Étape 4: Enregistrement de la transaction (Débit)
+            t.set(db.collection("transactions").doc(), {
+                uid: userId,
+                type: "external",
+                category: "withdrawal",
+                amount: amount,
+                direction: "debit",
+                source: "Balance",
+                target: "Disbursement",
+                details: `Retrait FedaPay ID: ${disbursement.id}`,
+                timestamp: now,
+            });
+
+            return { newBalance, disbursementId: disbursement.id };
         });
 
-        // --- 2. APPEL DE L'API FEDAPAY POUR LE DÉCAISSEMENT ---
-        const disbursement = await FedaPay.Disbursement.create({
-            amount: amount,
-            currency: { code: 'XOF' },
-            description: "Retrait Sabot Invest",
-            customer: { phone: receiverPhone },
-            // Utilisation de la variable d'environnement
-            callback_url: DISBURSEMENT_CALLBACK_URL 
-        });
-
-        // Mise à jour de la transaction dans Firestore avec l'ID FedaPay
-        await db.collection("transactions").doc(transactionDocId).update({
-            fedapay_id: disbursement.id,
-            status: 'pending_disbursement' // Statut clair pour le suivi
-        });
-        
-        // 3. Réponse au client
         return {
             statusCode: 200,
             body: JSON.stringify({ 
                 success: true, 
-                message: "Demande de retrait initiée. Le paiement est en cours de traitement.",
-                disbursement_id: disbursement.id
+                message: "Retrait initié avec succès. En attente de traitement FedaPay.",
+                newBalance: result.newBalance,
+                disbursementId: result.disbursementId
             })
         };
 
-    } catch (error) {
-        console.error("Erreur Retrait Serveur FedaPay:", error.message);
-        
-        if (error.message.includes('Solde retirable insuffisant')) {
-            return {
-                statusCode: 400,
-                body: JSON.stringify({ success: false, error: error.message })
-            };
+    } catch (e) {
+        let errorCode = 500;
+        let errorMessage = "Échec de l'initiation du retrait.";
+
+        if (e.message === "ERR_INSUFFICIENT_FUNDS") {
+            errorCode = 403; 
+            errorMessage = "Solde insuffisant pour ce retrait.";
+        } else if (e.message === "ERR_USER_NOT_FOUND") {
+            errorCode = 404;
+            errorMessage = "Utilisateur non trouvé.";
+        } else {
+            console.error("Erreur serveur lors de la transaction de retrait:", e);
         }
-        
-        // Cas d'erreur où le solde a été déduit mais l'appel FedaPay a échoué
-        // Idéalement, une transaction Firestore devrait tenter de renverser la déduction ici.
-        // Pour une solution rapide, on marque l'erreur
-        if (transactionDocId) {
-             await db.collection("transactions").doc(transactionDocId).update({
-                 status: 'failed_api_call',
-                 error_details: error.message
-             });
-        }
-        
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ success: false, error: "Erreur interne lors du traitement du décaissement." })
-        };
+
+        return { statusCode: errorCode, body: JSON.stringify({ error: errorMessage }) };
     }
 };
