@@ -210,14 +210,13 @@ document.getElementById("depositForm").addEventListener("submit", async (e) => {
     const selectedOption = document.getElementById("paymentMethod").options[document.getElementById("paymentMethod").selectedIndex];
     const methodId = selectedOption.value;
     const operator = selectedOption.dataset.operator;
-    const senderPhone = selectedOption.dataset.phone; 
     
     const errorDiv = document.getElementById("error");
     const depositBtn = document.getElementById("depositBtn");
     
     errorDiv.style.display = "none";
 
-    if (!methodId || !operator || !senderPhone) {
+    if (!methodId || !operator) { 
         errorDiv.innerText = "Veuillez sélectionner un moyen de paiement valide.";
         errorDiv.style.display = "block";
         return;
@@ -232,14 +231,15 @@ document.getElementById("depositForm").addEventListener("submit", async (e) => {
     depositBtn.innerText = "Traitement du dépôt...";
 
     try {
-        // --- LOGIQUE SÉCURISÉE CÔTÉ SERVEUR (Netlify Function) ---
-        // Le serveur va utiliser les infos (operator/senderPhone) pour initier FedaPay
+        // --- NOUVELLE ÉTAPE 1: Récupération du jeton sécurisé ---
+        const idToken = await user.getIdToken(); 
+
+        // --- NOUVELLE ÉTAPE 2: Création du payload corrigé ---
         const payload = {
-            uid: user.uid,
+            idToken: idToken,     // <-- CORRECTION MAJEURE: Le serveur attend idToken
             amount: amount,
-            operator: operator, 
-            senderPhone: senderPhone,
-            methodId: methodId,
+            paymentMethod: methodId, // <-- CORRECTION: Le serveur attend paymentMethod
+            // NOTE: Les autres champs ne sont plus nécessaires, car le serveur a déjà le methodId
         };
         
         // Ceci sera la fonction qui gère l'appel à l'API FedaPay
