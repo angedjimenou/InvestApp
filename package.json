@@ -9,9 +9,9 @@
     "deploy": "netlify deploy --prod",
     "test": "echo \"No tests specified\" && exit 0"
   },
-  "dependencies": {
+    "dependencies": {
     "firebase-admin": "^11.5.0",
-    "fedapay": "^3.0.0" 
+    "fedapay": "latest" 
   },
   "devDependencies": {
     "nodemon": "^3.0.1",
