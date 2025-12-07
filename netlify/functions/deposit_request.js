@@ -1,7 +1,7 @@
 // netlify/functions/deposit_request.js
 
 const admin = require("firebase-admin");
-const { FedaPay, Transaction } = require('fedapay'); // <--- MODIFICATION 1 (Destructuring)
+const FedaPay = require('fedapay'); // <-- Rétabli à l'original
 
 // --- Initialisation Firebase Admin (Sécurisée) ---
 if (!admin.apps.length) {
@@ -21,11 +21,9 @@ const db = admin.firestore();
 // --- Initialisation FedaPay ---
 // --------------------------------------------------------
 
-// Utilisez FedaPay.init() qui est plus récent et plus stable
-FedaPay.init({
-    apiKey: process.env.FEDAPAY_SECRET_KEY,
-    environment: 'live' 
-}); // <--- MODIFICATION 2 (Utilisation de init())
+// Rétabli aux méthodes originales qui étaient dans le code
+FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY); 
+FedaPay.setEnvironment('live'); // Ou 'sandbox'
 
 // --------------------------------------------------------
 // --- Fonction Principale ---
@@ -62,7 +60,7 @@ exports.handler = async (event, context) => {
 
     try {
         // Création de la transaction FedaPay
-        const transaction = await Transaction.create({
+        const transaction = await FedaPay.Transaction.create({ // Utilisation de FedaPay.Transaction
             description: transactionDescription,
             amount: amount,
             currency: 'XOF', // Adapter selon votre monnaie

@@ -1,7 +1,7 @@
 // netlify/functions/withdraw_request.js
 
 const admin = require('firebase-admin');
-const { FedaPay, Disbursement } = require('fedapay'); // <--- MODIFICATION 1 (Destructuring)
+const FedaPay = require('fedapay'); // <-- Import simple rétabli
 
 // --- Initialisation Firebase Admin (Sécurisée) ---
 if (!admin.apps.length) {
@@ -21,11 +21,9 @@ const db = admin.firestore();
 // --- Initialisation FedaPay ---
 // --------------------------------------------------------
 
-// Utilisez FedaPay.init() qui est plus récent et plus stable
-FedaPay.init({
-    apiKey: process.env.FEDAPAY_SECRET_KEY,
-    environment: 'live' 
-}); // <--- MODIFICATION 2 (Utilisation de init())
+// Rétabli aux méthodes originales 
+FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY); 
+FedaPay.setEnvironment('live'); // Rétabli
 
 // --------------------------------------------------------
 // --- Fonction Principale ---
@@ -77,7 +75,7 @@ exports.handler = async (event, context) => {
             
             // Étape 1: Créer le décaissement (Disbursement) via FedaPay
             // Note: Le montant est en XOF, currency doit correspondre à FedaPay.
-            const disbursement = await Disbursement.create({
+            const disbursement = await FedaPay.Disbursement.create({
                 amount: amount,
                 currency: 'XOF', 
                 // Assurez-vous que l'ID de la méthode de paiement est bien dans les données utilisateur
