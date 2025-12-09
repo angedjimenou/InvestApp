@@ -12,8 +12,6 @@
         background: #f0f2f5;
         padding-bottom: 30px; 
     }
-
-    /* Styles réutilisés */
     .header-bg {
         background: linear-gradient(135deg, #6a0dad, #8e44ad);
         height: 100px;
@@ -39,8 +37,6 @@
         color: #fff;
         z-index: 10;
     }
-
-    /* Centrage et ajustement du Conteneur */
     .form-container {
         width: 95%; 
         max-width: 350px; 
@@ -71,7 +67,7 @@
         padding: 12px;
         border: none;
         border-radius: 6px;
-        background: linear-gradient(45deg, #e74c3c, #c0392b); /* Rouge pour Retrait */
+        background: linear-gradient(45deg, #e74c3c, #c0392b);
         color: white;
         font-size: 16px;
         font-weight: bold;
@@ -117,43 +113,47 @@
 </head>
 <body>
 
-    <div class="header-bg">
-        <a href="wallet.html" class="back-btn"><i class="fas fa-arrow-left"></i></a>
-        <div class="header-title">Demande de Retrait</div>
+<div class="header-bg">
+    <a href="wallet.html" class="back-btn"><i class="fas fa-arrow-left"></i></a>
+    <div class="header-title">Demande de Retrait</div>
+</div>
+
+<div class="form-container">
+    <div class="info-box">
+        Montant minimum de retrait: <strong>1000 F</strong>. Les frais de réseau sont de <strong>15%</strong>.
+    </div>
+    
+    <div class="balance-display">
+        Solde Disponible: <span id="currentBalance">... F</span>
     </div>
 
-    <div class="form-container">
-        <div class="info-box">
-            Montant minimum de retrait: **1000 F**. Les frais de réseau peuvent s'appliquer.
-        </div>
+    <form id="withdrawForm">
+        <div id="error" class="error"></div>
         
-        <div class="balance-display">
-            Solde Disponible: <span id="currentBalance">... F</span>
+        <label for="paymentMethod">Moyen de Paiement pour Recevoir</label>
+        <select id="paymentMethod" required>
+            <option value="">Chargement des méthodes...</option>
+        </select>
+        <div id="noMethodsMessage" style="display: none;">
+            Aucune méthode trouvée. <a href="add_payment_method.html">Ajoutez-en une.</a>
         </div>
 
-        <form id="withdrawForm">
-            <div id="error" class="error"></div>
-            
-            <label for="paymentMethod">Moyen de Paiement pour Recevoir</label>
-            <select id="paymentMethod" required>
-                <option value="">Chargement des méthodes...</option>
-            </select>
-            <div id="noMethodsMessage" style="display: none;">
-                Aucune méthode trouvée. <a href="add_payment_method.html">Ajoutez-en une.</a>
-            </div>
+        <label for="amount">Montant à Retirer (F)</label>
+        <input type="number" id="amount" placeholder="Minimum 1000 F" min="1000" required>
 
-            <label for="amount">Montant à Retirer (F)</label>
-            <input type="number" id="amount" placeholder="Minimum 1000 F" min="1000" required>
+        <div class="info-box" id="feePreview" style="display:none;">
+            Frais (15%): <span id="feeAmount">0</span> F<br>
+            Montant Net: <span id="netAmount">0</span> F
+        </div>
 
-            <button type="submit" id="withdrawBtn" disabled>Demander le Retrait</button>
-        </form>
-    </div>
+        <button type="submit" id="withdrawBtn" disabled>Demander le Retrait</button>
+    </form>
+</div>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script>
-// Configuration Firebase (Idem que tous vos fichiers)
 const firebaseConfig = {
     apiKey: "AIzaSyDya4uWqXv_R7qjrBT4f3YlUr6mMarjgYo",
     authDomain: "investapp-1818c.firebaseapp.com",
@@ -166,7 +166,7 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-let userBalance = 0; // Variable globale pour stocker le solde
+let userBalance = 0;
 
 auth.onAuthStateChanged(user => {
     if(!user) return window.location.href='login.html';
@@ -177,130 +177,113 @@ auth.onAuthStateChanged(user => {
 async function loadUserData(uid) {
     const balanceSpan = document.getElementById("currentBalance");
     try {
-        const userRef = db.collection("users").doc(uid);
-        const doc = await userRef.get();
-        if (doc.exists) {
+        const doc = await db.collection("users").doc(uid).get();
+        if(doc.exists){
             userBalance = doc.data().balance || 0;
             balanceSpan.innerText = userBalance.toLocaleString('fr-FR') + ' F';
         }
-    } catch (error) {
-        console.error("Erreur chargement solde:", error);
+    } catch(e){
+        console.error(e);
         balanceSpan.innerText = 'Erreur';
     }
 }
 
-async function loadPaymentMethods(uid) {
+async function loadPaymentMethods(uid){
     const select = document.getElementById("paymentMethod");
     const noMethods = document.getElementById("noMethodsMessage");
     const withdrawBtn = document.getElementById("withdrawBtn");
-    
-    select.innerHTML = '<option value="">Sélectionnez un moyen de paiement</option>';
-    
-    try {
-        const methodsRef = db.collection("users").doc(uid).collection("payment_methods");
-        const snapshot = await methodsRef.get();
 
-        if (snapshot.empty) {
-            noMethods.style.display = 'block';
-            withdrawBtn.disabled = true;
+    select.innerHTML = '<option value="">Sélectionnez un moyen de paiement</option>';
+
+    try {
+        const snapshot = await db.collection("users").doc(uid).collection("payment_methods").get();
+        if(snapshot.empty){
+            noMethods.style.display='block';
+            withdrawBtn.disabled=true;
             return;
         }
-
-        snapshot.forEach(doc => {
+        snapshot.forEach(doc=>{
             const data = doc.data();
             const option = document.createElement('option');
-            option.value = doc.id; 
+            option.value = doc.id;
             option.dataset.operator = data.operator;
             option.dataset.phone = data.fullPhoneNumber;
-            
-            option.textContent = `${data.nickname} (${data.operator.toUpperCase().replace(/_/g, ' ')})`;
-            
+            option.textContent = `${data.nickname} (${data.operator.toUpperCase().replace(/_/g,' ')})`;
             select.appendChild(option);
         });
-        
-        withdrawBtn.disabled = false;
-
-    } catch (error) {
-        console.error("Erreur chargement méthodes:", error);
+        withdrawBtn.disabled = true; // activation via montant
+    } catch(e){
+        console.error(e);
         select.innerHTML = '<option value="">Erreur de chargement</option>';
         withdrawBtn.disabled = true;
     }
 }
 
+const amountInput = document.getElementById('amount');
+const feePreview = document.getElementById('feePreview');
+const feeAmountSpan = document.getElementById('feeAmount');
+const netAmountSpan = document.getElementById('netAmount');
 
-document.getElementById("withdrawForm").addEventListener("submit", async (e) => {
+amountInput.addEventListener('input', () => {
+    const amount = parseInt(amountInput.value) || 0;
+    if(amount >= 1000 && amount <= userBalance){
+        const fee = Math.floor(amount * 0.15);
+        const net = amount - fee;
+        feeAmountSpan.innerText = fee.toLocaleString('fr-FR');
+        netAmountSpan.innerText = net.toLocaleString('fr-FR');
+        feePreview.style.display='block';
+        withdrawBtn.disabled=false;
+    } else {
+        feePreview.style.display='none';
+        withdrawBtn.disabled=true;
+    }
+});
+
+document.getElementById("withdrawForm").addEventListener("submit", async (e)=>{
     e.preventDefault();
-
     const user = auth.currentUser;
-    if (!user) return;
+    if(!user) return;
 
-    const amount = parseInt(document.getElementById("amount").value);
-    const selectedOption = document.getElementById("paymentMethod").options[document.getElementById("paymentMethod").selectedIndex];
+    const amount = parseInt(amountInput.value);
+    const selectedOption = document.getElementById("paymentMethod").selectedOptions[0];
     const methodId = selectedOption.value;
-    const operator = selectedOption.dataset.operator;
-    const receiverPhone = selectedOption.dataset.phone; // Numéro où l'argent doit être envoyé
-    
-    const errorDiv = document.getElementById("error");
-    const withdrawBtn = document.getElementById("withdrawBtn");
-    
-    errorDiv.style.display = "none";
 
-    if (!methodId || !operator || !receiverPhone) {
+    const errorDiv = document.getElementById("error");
+    errorDiv.style.display = 'none';
+
+    if(!methodId){
         errorDiv.innerText = "Veuillez sélectionner un moyen de paiement valide.";
         errorDiv.style.display = "block";
         return;
     }
-    if (amount < 1000) {
-        errorDiv.innerText = "Le montant minimum de retrait est de 1000 F.";
-        errorDiv.style.display = "block";
-        return;
-    }
-    if (amount > userBalance) {
-        errorDiv.innerText = "Solde insuffisant pour ce retrait.";
-        errorDiv.style.display = "block";
-        return;
-    }
 
-    withdrawBtn.disabled = true;
-    withdrawBtn.innerText = "Envoi de la demande...";
+    withdrawBtn.disabled=true;
+    withdrawBtn.innerText="Envoi de la demande...";
 
-    try {
-        // --- LOGIQUE SÉCURISÉE CÔTÉ SERVEUR (Netlify Function) ---
-        // Le serveur va vérifier le solde, déduire le montant et enregistrer la requête.
-        const payload = {
-            uid: user.uid,
-            amount: amount,
-            operator: operator, 
-            receiverPhone: receiverPhone,
-            methodId: methodId,
-        };
-        
-        const response = await fetch('/.netlify/functions/withdraw_request', { 
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+    try{
+        const payload = { uid: user.uid, methodId, amount };
+        const response = await fetch('/.netlify/functions/withdraw_request', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(payload)
         });
-
         const result = await response.json();
-
-        if (response.ok && result.success) {
-            alert(`✅ Retrait de ${amount.toLocaleString()} F demandé. Le traitement est en cours.`);
-            window.location.href = "wallet.html"; 
+        if(response.ok && result.success){
+            alert(`✅ Retrait demandé : ${amount.toLocaleString()} F\nFrais : ${result.fee.toLocaleString()} F\nNet reçu : ${result.netAmount.toLocaleString()} F`);
+            window.location.href="wallet.html";
         } else {
-            errorDiv.innerText = result.error || "Erreur lors de la requête de retrait (Serveur).";
+            errorDiv.innerText = result.error || "Erreur lors de la requête de retrait.";
             errorDiv.style.display = "block";
         }
-
-    } catch (err) {
-        console.error("Erreur Retrait:", err);
-        errorDiv.innerText = "Erreur de connexion au serveur.";
-        errorDiv.style.display = "block";
+    } catch(err){
+        console.error(err);
+        errorDiv.innerText="Erreur de connexion au serveur.";
+        errorDiv.style.display="block";
     } finally {
-        withdrawBtn.disabled = false;
-        withdrawBtn.innerText = "Demander le Retrait";
+        withdrawBtn.disabled=false;
+        withdrawBtn.innerText="Demander le Retrait";
     }
 });
 </script>
-
 </body>
 </html>
