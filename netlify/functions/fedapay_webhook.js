@@ -1,82 +1,131 @@
 // netlify/functions/fedapay_webhook.js
 
-const admin = require('firebase-admin');
-const { initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
-const crypto = require('crypto');
+import { initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import crypto from 'crypto';
 
-// Initialisation Firebase Admin
-if (!admin.apps.length) {
-    const decodedServiceAccount = Buffer.from(
-        process.env.FIREBASE_ADMIN_CREDENTIALS,
-        'base64'
-    ).toString('utf8');
-    const serviceAccount = JSON.parse(decodedServiceAccount);
+// Empêche Firebase d'être initialisé plusieurs fois
+try {
+initializeApp();
+} catch (e) {}
 
-    initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
-}
 const db = getFirestore();
 
-// Vérification de la signature FedaPay
-const verifySignature = (payload, signature) => {
-    const secret = process.env.FEDAPAY_WEBHOOK_SECRET;
-    const hash = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-    return hash === signature;
+export default async function handler(event, context) {
+// Autoriser uniquement POST
+if (event.httpMethod !== "POST") {
+return {
+statusCode: 405,
+body: "Method Not Allowed",
 };
+}
 
-exports.handler = async (event) => {
-    try {
-        if (event.httpMethod !== 'POST') {
-            return { statusCode: 405, body: JSON.stringify({ success: false, error: 'Méthode non autorisée.' }) };
-        }
+const webhookSecret = process.env.FEDAPAY_WEBHOOK_SECRET;
 
-        const signature = event.headers['x-fedapay-signature'];
-        if (!verifySignature(event.body, signature)) {
-            return { statusCode: 403, body: JSON.stringify({ success: false, error: 'Signature invalide.' }) };
-        }
-
-        const data = JSON.parse(event.body);
-
-        // ID de la transaction FedaPay
-        const transactionId = data.id;
-        const status = data.status; // pending, approved, declined, canceled, refunded, transferred, expired
-
-        // Récupérer le dépôt correspondant dans Firestore
-        const depositRef = db.collection('deposits').doc(transactionId);
-        const depositDoc = await depositRef.get();
-
-        if (!depositDoc.exists) {
-            return { statusCode: 404, body: JSON.stringify({ success: false, error: 'Dépôt non trouvé.' }) };
-        }
-
-        // Mettre à jour le statut du dépôt
-        await depositRef.update({
-            status: status,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-
-        // Actions internes selon le statut
-        if (status === 'approved') {
-            const depositData = depositDoc.data();
-            const userRef = db.collection('users').doc(depositData.uid);
-            await userRef.update({
-                balance: admin.firestore.FieldValue.increment(depositData.amount)
-            });
-            // Ici tu peux notifier l’admin ou l’utilisateur si nécessaire
-        }
-
-        return {
-            statusCode: 200,
-            body: JSON.stringify({ success: true })
-        };
-
-    } catch (error) {
-        console.error('Erreur webhook FedaPay:', error);
-        return {
-            statusCode: 500,
-            body: JSON.stringify({ success: false, error: 'Erreur interne serveur.' })
-        };
-    }
+if (!webhookSecret) {
+return {
+statusCode: 500,
+body: "Missing FEDAPAY_WEBHOOK_SECRET",
 };
+}
+
+const signature = event.headers["x-fedapay-signature"];
+const timestamp = event.headers["x-fedapay-timestamp"];
+
+if (!signature || !timestamp) {
+return {
+statusCode: 400,
+body: "Missing signature headers",
+};
+}
+
+const rawBody = event.body;
+
+// Vérification signature — sécurité FedaPay
+const signedPayload = `${timestamp}.${rawBody}`;
+const expectedSignature = crypto
+.createHmac("sha256", webhookSecret)
+.update(signedPayload)
+.digest("hex");
+
+if (expectedSignature !== signature) {
+return {
+statusCode: 401,
+body: "Invalid signature",
+};
+}
+
+// Le JSON est vérifié, on peut traiter
+let data;
+try {
+data = JSON.parse(rawBody);
+} catch (err) {
+return {
+statusCode: 400,
+body: "Invalid JSON payload",
+};
+}
+
+const eventType = data?.event;
+const transaction = data?.data;
+
+if (!eventType || !transaction) {
+return {
+statusCode: 400,
+body: "Invalid FedaPay event structure",
+};
+}
+
+// On ne traite QUE les dépôts ici
+if (eventType !== "transaction.approved") {
+return {
+statusCode: 200,
+body: "Event ignored",
+};
+}
+
+const fedapayId = transaction.id;
+const amount = transaction.amount;
+const customerId = transaction.customer?.id;
+
+const metadata = transaction.metadata || {};
+const userUid = metadata.userUid;
+
+if (!userUid) {
+return {
+statusCode: 400,
+body: "Missing userUid metadata",
+};
+}
+
+try {
+const userRef = db.collection("users").doc(userUid);
+
+// On ajoute la transaction au sous-doc "deposits"
+await userRef
+.collection("deposits")
+.doc(String(fedapayId))
+.set({
+id: fedapayId,
+amount: amount,
+customerId: customerId || null,
+status: "approved",
+createdAt: new Date(),
+});
+
+// On augmente le solde utilisateur
+await userRef.update({
+balance: (await userRef.get()).data().balance + amount,
+});
+
+return {
+statusCode: 200,
+body: "Deposit processed",
+};
+} catch (e) {
+return {
+statusCode: 500,
+body: "Error processing deposit: " + e.message,
+};
+}
+}

@@ -1,4 +1,4 @@
-// netlify/functions/add_payment_method.js
+open// netlify/functions/add_payment_method.js
 const admin = require('firebase-admin');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');

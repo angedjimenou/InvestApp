@@ -5,6 +5,7 @@ const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { FedaPay, Customer, Transaction } = require('fedapay');
 
+// Initialisation Firebase Admin SDK
 if (!admin.apps.length) {
     const decodedServiceAccount = Buffer.from(
         process.env.FIREBASE_ADMIN_CREDENTIALS,
@@ -17,7 +18,7 @@ if (!admin.apps.length) {
 const db = getFirestore();
 
 FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY);
-FedaPay.setEnvironment('live'); // Production uniquement
+FedaPay.setEnvironment('live');
 
 exports.handler = async (event) => {
     if (event.httpMethod !== 'POST') {
@@ -25,77 +26,93 @@ exports.handler = async (event) => {
     }
 
     try {
-        const { uid, paymentMethodId, amount, currencyIso, description, merchantReference, customMetadata } = JSON.parse(event.body);
+        const { uid, paymentMethodId, amount, currencyIso } = JSON.parse(event.body);
 
-        if (!uid || !paymentMethodId || !amount || !currencyIso) {
+        if (!uid || !paymentMethodId || !amount) {
             return { statusCode: 400, body: JSON.stringify({ success: false, error: "Données manquantes." }) };
         }
 
-        // Récupérer le moyen de paiement
-        const methodRef = db.collection('users').doc(uid).collection('payment_methods').doc(paymentMethodId);
+        // Récupération du moyen de paiement
+        const methodRef = db.collection('users').doc(uid)
+            .collection('payment_methods').doc(paymentMethodId);
+
         const methodSnap = await methodRef.get();
         if (!methodSnap.exists) {
             return { statusCode: 404, body: JSON.stringify({ success: false, error: "Moyen de paiement introuvable." }) };
         }
+
         const method = methodSnap.data();
 
-        // Générer email fictif pour FedaPay
-        const userEmail = `${uid}@investapp.local`;
+        // Générer email fictif (obligation FedaPay)
+        const email = `${uid}@investapp.local`;
 
-        // Créer ou récupérer le Customer FedaPay
+        // Vérifier création Customer FedaPay
         let customerId = method.fedapayCustomerId || null;
         if (!customerId) {
             const customer = await Customer.create({
                 firstname: method.firstName,
                 lastname: method.lastName,
-                email: userEmail,
+                email,
                 phone_number: {
-                    number: method.phone, // Numéro tel complet, 0 inclus
+                    number: method.phone,
                     country: method.countryIso
                 }
             });
-            customerId = customer.id;
 
-            // Sauvegarder l'ID FedaPay pour réutilisation
+            customerId = customer.id;
             await methodRef.update({ fedapayCustomerId: customerId });
         }
 
-        // Créer la transaction
+        // Créer la collecte de paiement
         const transaction = await Transaction.create({
-            description: description || 'Dépôt',
-            amount: amount,
+            description: "Dépôt mobile money",
+            amount,
             currency: { iso: currencyIso },
             callback_url: process.env.DEPOSIT_CALLBACK_URL,
-            mode: method.operator, // Opérateur conforme FedaPay
             customer: { id: customerId },
-            merchant_reference: merchantReference || `DEP-${uid}-${Date.now()}`,
-            custom_metadata: customMetadata || { uid }
+            merchant_reference: `DEP-${uid}-${Date.now()}`,
+            custom_metadata: { uid }
         });
 
-        // Générer le token de paiement
-        const token = await transaction.generateToken();
+        // Générer token
+        const token = (await transaction.generateToken()).token;
 
-        // Sauvegarder la transaction localement
-        await db.collection('users').doc(uid).collection('deposits').add({
+        // ❗ENVOI DE LA DEMANDE MOBILE (ce qui manquait)
+        await transaction.sendNowWithToken(
+            method.operator,  // mtn, moov, etc.
+            token,
+            {
+                number: method.phone,
+                country: method.countryIso
+            }
+        );
+
+        // Stockage Firestore
+        await db.collection('deposits').doc(String(transaction.id)).set({
             transactionId: transaction.id,
-            status: 'pending',
+            status: "pending",
             amount,
             currencyIso,
+            uid,
             paymentMethodId,
+            operator: method.operator,
             merchantReference: transaction.merchant_reference,
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
         return {
             statusCode: 200,
-            body: JSON.stringify({ success: true, tokenUrl: token.url })
+            body: JSON.stringify({
+                success: true,
+                transactionId: transaction.id
+            })
         };
 
-    } catch (error) {
-        console.error("Erreur dépôt:", error);
+    } catch (err) {
+        console.error("Erreur dépôt :", err);
         return {
             statusCode: 500,
-            body: JSON.stringify({ success: false, error: "Erreur interne serveur." })
+            body: JSON.stringify({ success: false, error: "Erreur serveur." })
         };
     }
 };
