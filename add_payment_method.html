@@ -1,75 +1,174 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ajouter un moyen de paiement</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Ajouter un Moyen de Paiement</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"/>
+<style>
+    body { margin:0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; padding-bottom: 30px; }
+    .header-bg { background: linear-gradient(135deg, #6a0dad, #8e44ad); height: 100px; border-radius: 0 0 25px 25px; position: relative; display: flex; justify-content: center; align-items: center; box-shadow: 0 3px 10px rgba(106, 13, 173, 0.2); }
+    .header-title { color: #fff; font-size: 20px; font-weight: bold; padding: 0 60px; text-align: center; }
+    .back-btn { position: absolute; left: 15px; top: 35px; font-size: 20px; color: #fff; z-index: 10; transform: translateY(0); }
+    .form-container { width: 95%; max-width: 350px; margin: 30px auto; background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+    label { display: block; font-weight: 600; margin-bottom: 6px; color: #4B0082; font-size: 14px; }
+    input, select { width: 100%; padding: 10px 12px; margin-bottom: 18px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
+    button { width: 100%; padding: 12px; border: none; border-radius: 6px; background: linear-gradient(45deg, #f39c12, #e67e22); color: white; font-size: 16px; font-weight: bold; cursor: pointer; transition: background 0.3s; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    .error, .limit-message { color: #e74c3c; margin-bottom: 15px; font-weight: 600; text-align: center; }
+    .limit-message { color: #6a0dad; background-color: #e0b0ff; padding: 10px; border-radius: 8px; }
+    .phone-input-group { display: flex; margin-bottom: 18px; }
+    #countryCodeDisplay { padding: 10px 10px; border: 1px solid #ccc; border-right: none; background-color: #eee; border-radius: 6px 0 0 6px; font-size: 15px; font-weight: bold; color: #4B0082; display: flex; align-items: center; justify-content: center; }
+    #phoneNumber { flex-grow: 1; border-radius: 0 6px 6px 0 !important; margin-bottom: 0 !important; border-left: 1px solid #ccc !important; }
+</style>
 </head>
 <body>
 
-<h2>Ajouter un moyen de paiement</h2>
+<div class="header-bg">
+    <a href="wallet.html" class="back-btn"><i class="fas fa-arrow-left"></i></a>
+    <div class="header-title">Ajouter un Moyen de Paiement</div>
+</div>
 
-<form id="paymentForm">
-    <label>UID utilisateur :</label>
-    <input type="text" id="uid" placeholder="UID Firebase" required><br><br>
+<div class="form-container">
+    <div id="methodLimitMessage" class="limit-message" style="display: none;">
+        Vous avez atteint la limite de 3 moyens de paiement.
+    </div>
+    
+    <form id="addMethodForm">
+        <div id="error" class="error" style="display: none;"></div>
 
-    <label>Surnom (nickname) :</label>
-    <input type="text" id="nickname" placeholder="Ex: Mon MTN" required><br><br>
+        <label for="nickname">Nom de ce moyen de paiement</label>
+        <input type="text" id="nickname" placeholder="Ex: Mon MTN Personnel" required maxlength="25">
 
-    <label>Opérateur :</label>
-    <select id="operator" required>
-        <option value="">Choisir...</option>
-        <option>MTN Bénin</option>
-        <option>Moov Bénin</option>
-        <option>Celtiis</option>
-        <option>Moov Togo</option>
-        <option>Mixx By Yas</option>
-        <option>MTN Côte d'Ivoire</option>
-        <option>Airtel Niger</option>
-        <option>Free Senegal</option>
-    </select><br><br>
+        <label for="operator">Opérateur/Réseau</label>
+        <select id="operator" required>
+            <option value="">Sélectionnez un Opérateur</option>
+            <option value="mtn_open">MTN Mobile Money (Bénin)</option>
+            <option value="moov">Moov Money (Bénin)</option>
+            <option value="mtn_ci">MTN (Côte d'Ivoire)</option>
+            <option value="moov_ci">Moov (Côte d'Ivoire)</option>
+            <option value="free_sn">Free Money (Sénégal)</option>
+            <option value="airtel_ne">Airtel Money (Niger)</option>
+            <option value="sbin">Celtiis (Bénin)</option>
+            <option value="togocel">Mixx By Yas (Togo)</option>
+        </select>
+        
+        <label>Numéro Mobile Money (local)</label>
+        <div class="phone-input-group">
+            <div id="countryCodeDisplay">+229</div>
+            <input type="tel" id="phoneNumber" placeholder="Numéro sans indicatif" required>
+        </div>
+        
+        <label for="fullName">Nom & Prénoms</label>
+        <input type="text" id="fullName" placeholder="Nom et Prénom" required>
 
-    <label>Prénom :</label>
-    <input type="text" id="firstName" required><br><br>
+        <button type="submit" id="addBtn">Enregistrer le Moyen de Paiement</button>
+    </form>
+</div>
 
-    <label>Nom :</label>
-    <input type="text" id="lastName" required><br><br>
-
-    <label>Numéro Mobile Money :</label>
-    <input type="text" id="phone" placeholder="Sans indicatif" required><br><br>
-
-    <button type="submit">Ajouter</button>
-</form>
-
-
-<p id="response" style="margin-top:20px; font-weight:bold;"></p>
-
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
 <script>
-document.getElementById("paymentForm").addEventListener("submit", async (e) => {
+// ==== FIREBASE CONFIG ====
+const firebaseConfig = {
+    apiKey: "AIzaSyDya4uWqXv_R7qjrBT4f3YlUr6mMarjgYo",
+    authDomain: "investapp-1818c.firebaseapp.com",
+    projectId: "investapp-1818c",
+    storageBucket: "investapp-1818c.firebasestorage.app",
+    messagingSenderId: "416640904710",
+    appId: "1:416640904710:web:a810b7ed5b8bd41d9c9d87"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const MAX_METHODS = 3;
+
+// Detect user
+auth.onAuthStateChanged(async (user) => {
+    if (!user) return window.location.href = "login.html";
+    loadUserCountryCode(user.uid);
+    checkMethodLimit(user.uid);
+});
+
+// Load countryCode display
+async function loadUserCountryCode(uid) {
+    const doc = await db.collection("users").doc(uid).get();
+    const code = (doc.exists && doc.data().countryCode) ? doc.data().countryCode : "+229";
+    document.getElementById("countryCodeDisplay").innerText = code;
+}
+
+// Limit methods
+async function checkMethodLimit(uid) {
+    const methods = await db.collection("users").doc(uid).collection("payment_methods").get();
+    if (methods.size >= MAX_METHODS) {
+        document.getElementById("addMethodForm").style.display = 'none';
+        document.getElementById("methodLimitMessage").style.display = 'block';
+    }
+}
+
+// Submit form
+document.getElementById("addMethodForm").addEventListener("submit", async (e) => {
     e.preventDefault();
 
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const nickname = document.getElementById("nickname").value.trim();
+    const operator = document.getElementById("operator").value;
+    const phone = document.getElementById("phoneNumber").value.trim();
+    const fullName = document.getElementById("fullName").value.trim();
+
+    const [firstName, ...rest] = fullName.split(" ");
+    const lastName = rest.join(" ") || "";
+
+    const errorDiv = document.getElementById("error");
+    const button = document.getElementById("addBtn");
+    errorDiv.style.display = "none";
+
+    if (!nickname || !operator || !phone || !fullName) {
+        errorDiv.innerText = "Veuillez remplir tous les champs.";
+        errorDiv.style.display = "block";
+        return;
+    }
+
+    button.disabled = true;
+    button.innerText = "Enregistrement...";
+
     const payload = {
-        uid: document.getElementById("uid").value.trim(),
-        nickname: document.getElementById("nickname").value.trim(),
-        operator: document.getElementById("operator").value.trim(),
-        firstName: document.getElementById("firstName").value.trim(),
-        lastName: document.getElementById("lastName").value.trim(),
-        phone: document.getElementById("phone").value.trim(),
+        uid: user.uid,
+        nickname,
+        operator,
+        phone,         // NUMÉRO LOCAL !!! PAS FULL PHONE
+        firstName,
+        lastName
     };
 
-    document.getElementById("response").innerText = "Envoi...";
+    try {
+        const res = await fetch("/.netlify/functions/add_payment_method", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
 
-    const res = await fetch("/.netlify/functions/add_payment_method", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    });
+        const data = await res.json();
 
-    const data = await res.json();
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || "Erreur serveur");
+        }
 
-    document.getElementById("response").innerText =
-        data.success ? "✔️ Méthode enregistrée !" : "❌ " + data.error;
+        alert("Moyen de paiement ajouté !");
+        window.location.href = "wallet.html";
+
+    } catch (err) {
+        errorDiv.innerText = err.message;
+        errorDiv.style.display = "block";
+    } finally {
+        button.disabled = false;
+        button.innerText = "Enregistrer le Moyen de Paiement";
+    }
 });
 </script>
 

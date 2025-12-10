@@ -12,55 +12,68 @@ if (!admin.apps.length) {
 }
 const db = getFirestore();
 
-// Configuration FedaPay live
+// FedaPay Live
 FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY);
-FedaPay.setEnvironment('live'); // live uniquement
+FedaPay.setEnvironment('live');
 
 const MAX_METHODS = 3;
 
-// Correspondance opérateurs FedaPay
+// Map opérateurs → FedaPay operator
 const operatorMap = {
-    "MTN Bénin": "mtn_open",
-    "Moov Bénin": "moov",
-    "Celtiis": "sbin",
-    "Moov Togo": "moov_tg",
-    "Mixx By Yas": "togocel",
-    "MTN Côte d'Ivoire": "mtn_ci",
-    "Airtel Niger": "airtel_ne",
-    "Free Senegal": "free_sn"
+    "mtn_open": "mtn_open",
+    "moov": "moov",
+    "sbin": "sbin",
+    "moov_tg": "moov_tg",
+    "togocel": "togocel",
+    "mtn_ci": "mtn_ci",
+    "airtel_ne": "airtel_ne",
+    "free_sn": "free_sn"
 };
 
-// Correspondance opérateurs → code ISO
-const countryMap = {
-    "MTN Bénin": "bj",
-    "Moov Bénin": "bj",
-    "Moov Togo": "tg",
-    "MTN Côte d'Ivoire": "ci",
-    "Airtel Niger": "ne",
-    "Free Senegal": "sn"
+// Map opérateurs → ISO
+const countryIsoMap = {
+    "mtn_open": "bj",
+    "moov": "bj",
+    "sbin": "bj",
+    "moov_tg": "tg",
+    "togocel": "tg",
+    "mtn_ci": "ci",
+    "airtel_ne": "ne",
+    "free_sn": "sn"
 };
 
-// Fonction pour créer ou récupérer le Customer FedaPay
+// Nettoyage nom/prénom → email propre
+function cleanString(str) {
+    return str
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "") // accents
+        .replace(/[^a-zA-Z0-9]/g, "")    // caractères interdits
+        .toLowerCase();
+}
+
+// Création / récupération customer FedaPay
 async function getOrCreateCustomer(user, countryIso) {
-    const customerRef = db.collection('users').doc(user.uid).collection('customer_fedapay').doc('customer');
-    const customerSnap = await customerRef.get();
-    if (customerSnap.exists) return customerSnap.data();
+    const ref = db.collection("users").doc(user.uid).collection("customer_fedapay").doc("customer");
+    const snap = await ref.get();
+    if (snap.exists) return snap.data();
 
-    // Création d'email fictif unique
-    const emailFictif = `${user.firstName}.${user.lastName}@investapp.local`.toLowerCase();
+    const firstnameClean = cleanString(user.firstName);
+    const lastnameClean = cleanString(user.lastName);
+    const email = `${firstnameClean}.${lastnameClean}@sabotinvest.site`;
 
-    // Création du customer chez FedaPay
+    // Création Customer FedaPay
     const newCustomer = await Customer.create({
         firstname: user.firstName,
         lastname: user.lastName,
-        email: emailFictif,
+        email,
         phone_number: {
             number: user.phone,
             country: countryIso
         }
     });
 
-    await customerRef.set({ id: newCustomer.id });
+    await ref.set({ id: newCustomer.id });
+
     return { id: newCustomer.id };
 }
 
@@ -71,42 +84,51 @@ exports.handler = async (event) => {
     }
 
     try {
-        const { uid, nickname, operator, firstName, lastName, phone } = JSON.parse(event.body);
+        const data = JSON.parse(event.body);
+        const { uid, nickname, operator, firstName, lastName, phone } = data;
 
         if (!uid || !nickname || !operator || !firstName || !lastName || !phone) {
             return { statusCode: 400, body: JSON.stringify({ success: false, error: "Données manquantes." }) };
         }
 
+        // Vérification limite
         const methodsRef = db.collection("users").doc(uid).collection("payment_methods");
-        const snapshot = await methodsRef.get();
-        if (snapshot.size >= MAX_METHODS) {
-            return { statusCode: 403, body: JSON.stringify({ success: false, error: `Limite de moyens de paiement atteinte (${MAX_METHODS}).` }) };
+        const existing = await methodsRef.get();
+        if (existing.size >= MAX_METHODS) {
+            return { statusCode: 403, body: JSON.stringify({ success: false, error: "Limite de 3 moyens de paiement." }) };
         }
 
-        // Déduction automatique du code ISO
-        const countryIso = countryMap[operator] || "bj"; // défaut BJ si opérateur non trouvé
+        // Déduction ISO depuis opérateur
+        const countryIso = countryIsoMap[operator] || "bj";
 
-        // Création ou récupération du customer FedaPay
+        // Customer FedaPay
         const customer = await getOrCreateCustomer({ uid, firstName, lastName, phone }, countryIso);
 
-        // Ajout du moyen de paiement
+        // Méthode de paiement Firestore
         const newMethod = {
             nickname,
             operator: operatorMap[operator] || operator,
             firstName,
             lastName,
-            phone,
-            countryIso,  // ✅ corrigé
+            phone,           // 🚩 Important : numéro local seul
+            countryIso,      // 🚩 Déduit automatiquement
             customerId: customer.id,
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
         await methodsRef.add(newMethod);
 
-        return { statusCode: 200, body: JSON.stringify({ success: true, message: "Moyen de paiement enregistré.", method: newMethod }) };
+        return {
+            statusCode: 200,
+            body: JSON.stringify({
+                success: true,
+                message: "Moyen de paiement enregistré.",
+                method: newMethod
+            })
+        };
 
-    } catch (error) {
-        console.error("Erreur serveur Netlify:", error);
+    } catch (err) {
+        console.error("Erreur add_payment_method:", err);
         return { statusCode: 500, body: JSON.stringify({ success: false, error: "Erreur interne du serveur." }) };
     }
 };
