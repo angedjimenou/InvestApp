@@ -71,17 +71,24 @@ exports.handler = async (event) => {
             }
         );
 
-        // Stockage Firestore
-        await db.collection('deposits').doc(String(transaction.id)).set({
-            transactionId: transaction.id,
-            status: "pending",
+        // 🔹 Stockage dans transactions (et non plus deposits)
+        await db.collection('transactions').doc(String(transaction.id)).set({
+            uid,
+            type: "external",
+            category: "deposit",
             amount,
             currencyIso,
-            uid,
             paymentMethodId,
             operator: method.operator,
             merchantReference: transaction.merchant_reference,
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
+            transactionId: transaction.id,
+            status: "pending",  // statut initial
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            metadata: {
+                phone: method.phone,
+                customerId: method.customerId,
+                operator: method.operator
+            }
         });
 
         return {
