@@ -3,13 +3,11 @@
 const admin = require('firebase-admin');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
-// Import de Payout pour le retrait (Disbursement)
 const { FedaPay, Payout, ApiConnectionError } = require('fedapay'); 
 
 let db; // Déclarer la référence Firestore dans le scope du module
 
-// 🚨 CORRECTION CRUCIALE : Initialisation Firebase Admin
-// Cette vérification garantit qu'on initialise l'App et la référence DB une seule fois.
+// 🚨 INITIALISATION FIREBASE ADMIN (CORRIGÉE pour éviter l'erreur 'app/no-app' sur Netlify)
 if (!admin.apps.length) {
     try {
         const decodedServiceAccount = Buffer.from(
@@ -28,7 +26,7 @@ if (!admin.apps.length) {
         console.error("Erreur lors de l'initialisation de Firebase Admin:", error);
     }
 } else {
-    // Si l'application existe déjà (réutilisation du conteneur), récupérer la référence
+    // Si l'application existe déjà (réutilisation du conteneur)
     try {
         db = getFirestore();
     } catch (error) {
@@ -41,7 +39,7 @@ FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY);
 FedaPay.setEnvironment('live');
 
 exports.handler = async (event) => {
-    // 🚨 VÉRIFICATION DE SÉCURITÉ : S'assurer que 'db' est défini
+    // Vérification de l'initialisation DB
     if (!db) {
         return { statusCode: 500, body: JSON.stringify({ success: false, error: "Erreur interne: Firebase Admin non initialisé. Vérifiez les logs de démarrage." }) };
     }
@@ -103,15 +101,19 @@ exports.handler = async (event) => {
             callback_url: process.env.DISBURSEMENT_CALLBACK_URL,
             merchant_reference: `WDR-${uid}-${Date.now()}`,
             
+            // 🚨 CORRECTION : AJOUT DE L'OBJET 'customer' avec l'ID
+            customer: { id: customerId }, 
+            
+            // Détails du destinataire (nécessaire pour le Payout)
             receiver: {
                 phone_number: {
                     number: method.phone,
                     country: method.countryIso
                 },
-                provider: method.operator, // L'opérateur (mtn_open, moov, etc.)
+                provider: method.operator,
             },
             
-            custom_metadata: { uid, customerId: customerId, methodId }
+            custom_metadata: { uid, methodId }
         });
 
         // 4. Sauvegarde de la transaction dans Firestore
@@ -146,10 +148,12 @@ exports.handler = async (event) => {
     } catch (error) {
         console.error("Erreur retrait:", error);
         
+        // Gestion de l'erreur SOLDE_INSUFFISANT
         if (error.message === "SOLDE_INSUFFISANT") {
             return { statusCode: 400, body: JSON.stringify({ success: false, error: "Solde insuffisant pour ce retrait." }) };
         }
-
+        
+        // Gestion des erreurs FedaPay (ApiConnectionError)
         let errorMessage = "Erreur interne serveur.";
         if (error instanceof ApiConnectionError && error.errorMessage) {
             errorMessage = `Erreur FedaPay: ${error.errorMessage}. Veuillez réessayer.`;
