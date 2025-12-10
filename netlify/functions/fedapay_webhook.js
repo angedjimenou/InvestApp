@@ -1,103 +1,80 @@
 // netlify/functions/fedapay_webhook.js
-import { initializeApp } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import crypto from 'crypto';
+const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
-// Initialisation Firebase (évite doublons)
-try { initializeApp(); } catch(e){}
+// Initialisation Firebase Admin SDK
+if (!admin.apps.length) {
+    const decodedServiceAccount = Buffer.from(
+        process.env.FIREBASE_ADMIN_CREDENTIALS,
+        'base64'
+    ).toString('utf8');
+    const serviceAccount = JSON.parse(decodedServiceAccount);
+    initializeApp({ credential: admin.credential.cert(serviceAccount) });
+}
 
 const db = getFirestore();
 
-export async function handler(event, context) {
-    if (event.httpMethod !== "POST") {
-        return new Response(JSON.stringify({ error: "Method Not Allowed" }), { status: 405 });
+exports.handler = async (event) => {
+    if (event.httpMethod !== 'POST') {
+        return {
+            statusCode: 405,
+            body: JSON.stringify({ success: false, error: "Méthode non autorisée." })
+        };
     }
-
-    const webhookSecret = process.env.FEDAPAY_WEBHOOK_SECRET;
-    if (!webhookSecret) return new Response("Missing FEDAPAY_WEBHOOK_SECRET", { status: 500 });
-
-    const signature = event.headers["x-fedapay-signature"];
-    const timestamp = event.headers["x-fedapay-timestamp"];
-    if (!signature || !timestamp) return new Response("Missing signature headers", { status: 400 });
-
-    const rawBody = event.body;
-
-    // Vérification signature
-    const signedPayload = `${timestamp}.${rawBody}`;
-    const expectedSignature = crypto
-        .createHmac("sha256", webhookSecret)
-        .update(signedPayload)
-        .digest("hex");
-
-    if (expectedSignature !== signature) {
-        return new Response("Invalid signature", { status: 401 });
-    }
-
-    let data;
-    try { data = JSON.parse(rawBody); } catch(err) {
-        return new Response("Invalid JSON payload", { status: 400 });
-    }
-
-    const eventType = data?.event;
-    const transactionData = data?.data;
-    if (!eventType || !transactionData) return new Response("Invalid FedaPay event structure", { status: 400 });
-
-    const fedapayId = transactionData.id;
-    const metadata = transactionData.metadata || {};
-    const uid = metadata.uid;
-
-    if (!uid) return new Response("Missing userUid metadata", { status: 400 });
 
     try {
-        const userRef = db.collection("users").doc(uid);
-        const userSnap = await userRef.get();
-        if (!userSnap.exists) return new Response("User not found", { status: 404 });
+        const payload = JSON.parse(event.body);
+        const eventType = payload.type;  // ex: transaction.canceled
+        const transactionData = payload.data;
 
-        const userData = userSnap.data();
-        const txRef = db.collection("transactions").doc(String(fedapayId));
-        const now = new Date();
+        console.log("FedaPay Event Received:", eventType, transactionData);
+
+        // Seulement traiter les transactions liées aux dépôts
+        if (!transactionData || !transactionData.id) {
+            return {
+                statusCode: 400,
+                body: JSON.stringify({ success: false, error: "Transaction invalide." })
+            };
+        }
 
         let statusToSet = "pending";
 
-        if (eventType === "transaction.approved") {
+        if (eventType === "transaction.approved" || eventType === "payment_request.approved") {
             statusToSet = "approved";
-            const amount = transactionData.amount || 0;
-            await userRef.update({
-                balance: (userData.balance || 0) + amount,
-                updatedAt: now
-            });
-        } else if (eventType === "transaction.declined") {
+        } else if (eventType === "transaction.declined" || eventType === "payment_request.declined") {
             statusToSet = "declined";
-        } else if (eventType === "transaction.canceled") {
+        } else if (eventType === "transaction.canceled" || eventType === "payment_request.canceled") {
             statusToSet = "canceled";
-        } else {
-            // Ignorer autres événements pour l'instant
-            return new Response("Event ignored", { status: 200 });
         }
 
-        // Mise à jour ou création de la transaction
+        const txRef = db.collection("transactions").doc(String(transactionData.id));
+
+        // Mettre à jour le document avec merge: true
         await txRef.set({
-            uid,
-            type: "external",
-            category: "deposit",
-            amount: transactionData.amount || 0,
-            currencyIso: transactionData.currency?.iso || "XOF",
-            paymentMethodId: metadata.paymentMethodId || null,
-            operator: metadata.operator || null,
-            merchantReference: transactionData.merchant_reference || null,
-            transactionId: fedapayId,
             status: statusToSet,
-            updatedAt: now,
-            metadata: {
-                ...metadata,
-                originalData: transactionData
-            }
+            amount: transactionData.amount,
+            currencyIso: transactionData.currency?.iso || "XOF",
+            uid: transactionData.custom_metadata?.uid || transactionData.uid || null,
+            paymentMethodId: transactionData.custom_metadata?.paymentMethodId || transactionData.paymentMethodId || null,
+            operator: transactionData.operator || null,
+            merchantReference: transactionData.merchant_reference || null,
+            phone: transactionData.phone || null,
+            updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
 
-        return new Response(JSON.stringify({ success: true }), { status: 200 });
+        console.log(`Transaction ${transactionData.id} mise à jour avec status: ${statusToSet}`);
 
-    } catch (e) {
-        console.error("Webhook error:", e);
-        return new Response(JSON.stringify({ error: "Error processing transaction", message: e.message }), { status: 500 });
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ success: true })
+        };
+
+    } catch (err) {
+        console.error("Erreur webhook FedaPay :", err);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ success: false, error: "Erreur serveur." })
+        };
     }
-}
+};
