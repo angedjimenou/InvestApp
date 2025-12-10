@@ -4,128 +4,152 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import crypto from 'crypto';
 
-// Empêche Firebase d'être initialisé plusieurs fois
+// Initialisation Firebase (évite les doublons)
 try {
-initializeApp();
+  initializeApp();
 } catch (e) {}
 
 const db = getFirestore();
 
 export default async function handler(event, context) {
-// Autoriser uniquement POST
-if (event.httpMethod !== "POST") {
-return {
-statusCode: 405,
-body: "Method Not Allowed",
-};
-}
+  // Autoriser uniquement POST
+  if (event.httpMethod !== "POST") {
+    return {
+      statusCode: 405,
+      body: "Method Not Allowed",
+    };
+  }
 
-const webhookSecret = process.env.FEDAPAY_WEBHOOK_SECRET;
+  const webhookSecret = process.env.FEDAPAY_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    return {
+      statusCode: 500,
+      body: "Missing FEDAPAY_WEBHOOK_SECRET",
+    };
+  }
 
-if (!webhookSecret) {
-return {
-statusCode: 500,
-body: "Missing FEDAPAY_WEBHOOK_SECRET",
-};
-}
+  const signature = event.headers["x-fedapay-signature"];
+  const timestamp = event.headers["x-fedapay-timestamp"];
+  if (!signature || !timestamp) {
+    return {
+      statusCode: 400,
+      body: "Missing signature headers",
+    };
+  }
 
-const signature = event.headers["x-fedapay-signature"];
-const timestamp = event.headers["x-fedapay-timestamp"];
+  const rawBody = event.body;
 
-if (!signature || !timestamp) {
-return {
-statusCode: 400,
-body: "Missing signature headers",
-};
-}
+  // Vérification de la signature
+  const signedPayload = `${timestamp}.${rawBody}`;
+  const expectedSignature = crypto
+    .createHmac("sha256", webhookSecret)
+    .update(signedPayload)
+    .digest("hex");
 
-const rawBody = event.body;
+  if (expectedSignature !== signature) {
+    return {
+      statusCode: 401,
+      body: "Invalid signature",
+    };
+  }
 
-// Vérification signature — sécurité FedaPay
-const signedPayload = `${timestamp}.${rawBody}`;
-const expectedSignature = crypto
-.createHmac("sha256", webhookSecret)
-.update(signedPayload)
-.digest("hex");
+  // Parse JSON
+  let data;
+  try {
+    data = JSON.parse(rawBody);
+  } catch (err) {
+    return { statusCode: 400, body: "Invalid JSON payload" };
+  }
 
-if (expectedSignature !== signature) {
-return {
-statusCode: 401,
-body: "Invalid signature",
-};
-}
+  const eventType = data?.event;
+  const transaction = data?.data;
 
-// Le JSON est vérifié, on peut traiter
-let data;
-try {
-data = JSON.parse(rawBody);
-} catch (err) {
-return {
-statusCode: 400,
-body: "Invalid JSON payload",
-};
-}
+  if (!eventType || !transaction) {
+    return { statusCode: 400, body: "Invalid FedaPay event structure" };
+  }
 
-const eventType = data?.event;
-const transaction = data?.data;
+  // Ne traite que les événements transactionnels
+  if (!eventType.startsWith("transaction.")) {
+    return { statusCode: 200, body: "Event ignored" };
+  }
 
-if (!eventType || !transaction) {
-return {
-statusCode: 400,
-body: "Invalid FedaPay event structure",
-};
-}
+  const fedapayId = transaction.id;
+  const amount = transaction.amount || 0;
+  const customerId = transaction.customer?.id || null;
+  const metadata = transaction.metadata || {};
+  const userUid = metadata.userUid;
 
-// On ne traite QUE les dépôts ici
-if (eventType !== "transaction.approved") {
-return {
-statusCode: 200,
-body: "Event ignored",
-};
-}
+  if (!userUid) {
+    return { statusCode: 400, body: "Missing userUid metadata" };
+  }
 
-const fedapayId = transaction.id;
-const amount = transaction.amount;
-const customerId = transaction.customer?.id;
+  const now = new Date();
 
-const metadata = transaction.metadata || {};
-const userUid = metadata.userUid;
+  // Détermine le statut à enregistrer dans transactions
+  let status = "pending";
+  switch (eventType) {
+    case "transaction.created":
+      status = "pending";
+      break;
+    case "transaction.approved":
+      status = "approved";
+      break;
+    case "transaction.declined":
+      status = "declined";
+      break;
+    case "transaction.canceled":
+      status = "canceled";
+      break;
+    case "transaction.refunded":
+      status = "refunded";
+      break;
+  }
 
-if (!userUid) {
-return {
-statusCode: 400,
-body: "Missing userUid metadata",
-};
-}
+  try {
+    const userRef = db.collection("users").doc(userUid);
+    const userSnap = await userRef.get();
 
-try {
-const userRef = db.collection("users").doc(userUid);
+    if (!userSnap.exists) {
+      return { statusCode: 404, body: "User not found" };
+    }
 
-// On ajoute la transaction au sous-doc "deposits"
-await userRef
-.collection("deposits")
-.doc(String(fedapayId))
-.set({
-id: fedapayId,
-amount: amount,
-customerId: customerId || null,
-status: "approved",
-createdAt: new Date(),
-});
+    const userData = userSnap.data();
+    let newBalance = userData.balance || 0;
 
-// On augmente le solde utilisateur
-await userRef.update({
-balance: (await userRef.get()).data().balance + amount,
-});
+    // Seule une transaction approuvée crédite le solde
+    if (status === "approved") {
+      newBalance += amount;
+      await userRef.update({
+        balance: newBalance,
+        updatedAt: now,
+      });
+    }
 
-return {
-statusCode: 200,
-body: "Deposit processed",
-};
-} catch (e) {
-return {
-statusCode: 500,
-body: "Error processing deposit: " + e.message,
-};
-}
+    // Enregistre la transaction dans la collection globale
+    await db.collection("transactions").doc(String(fedapayId)).set({
+      uid: userUid,
+      type: "external",       // paiement externe
+      category: "deposit",    // dépôt
+      amount,
+      direction: status === "approved" ? "credit" : "none",
+      source: "FedaPay",
+      target: "Balance",
+      status,
+      metadata: {
+        customerId,
+        originalData: transaction,
+      },
+      timestamp: now,
+    });
+
+    return {
+      statusCode: 200,
+      body: `Transaction ${status} processed`,
+    };
+  } catch (e) {
+    return {
+      statusCode: 500,
+      body: "Error processing transaction: " + e.message,
+    };
+  }
 }
