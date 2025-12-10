@@ -3,18 +3,49 @@
 const admin = require('firebase-admin');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
-// 🚨 CHANGEMENT : Remplacement de 'Transaction' par 'Payout'
-const { FedaPay, Payout, ApiConnectionError } = require('fedapay'); 
+// Import de Payout pour le retrait (Disbursement)
+const { FedaPay, Payout, ApiConnectionError } = require('fedapay'); 
 
-// ... (Initialisation Firebase Admin SDK et FedaPay inchangées) ...
+let db; // Déclarer la référence Firestore dans le scope du module
 
-const db = getFirestore();
+// 🚨 CORRECTION CRUCIALE : Initialisation Firebase Admin
+// Cette vérification garantit qu'on initialise l'App et la référence DB une seule fois.
+if (!admin.apps.length) {
+    try {
+        const decodedServiceAccount = Buffer.from(
+            process.env.FIREBASE_ADMIN_CREDENTIALS,
+            'base64'
+        ).toString('utf8');
+        const serviceAccount = JSON.parse(decodedServiceAccount);
+        
+        // 1. Initialiser l'application
+        initializeApp({ credential: admin.credential.cert(serviceAccount) });
+        
+        // 2. Récupérer la référence Firestore juste après l'initialisation
+        db = getFirestore();
+        
+    } catch (error) {
+        console.error("Erreur lors de l'initialisation de Firebase Admin:", error);
+    }
+} else {
+    // Si l'application existe déjà (réutilisation du conteneur), récupérer la référence
+    try {
+        db = getFirestore();
+    } catch (error) {
+         console.error("Erreur lors de la récupération de getFirestore sur l'application existante:", error);
+    }
+}
 
 // Configuration FedaPay
 FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY);
 FedaPay.setEnvironment('live');
 
 exports.handler = async (event) => {
+    // 🚨 VÉRIFICATION DE SÉCURITÉ : S'assurer que 'db' est défini
+    if (!db) {
+        return { statusCode: 500, body: JSON.stringify({ success: false, error: "Erreur interne: Firebase Admin non initialisé. Vérifiez les logs de démarrage." }) };
+    }
+    
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ success: false, error: "Méthode non autorisée." }) };
     }
@@ -26,7 +57,7 @@ exports.handler = async (event) => {
             return { statusCode: 400, body: JSON.stringify({ success: false, error: "Données de retrait invalides ou montant minimum non atteint (1000 F)." }) };
         }
 
-        // Récupération des références et de la méthode de paiement (inchangé)
+        // Récupération des références
         const userRef = db.collection('users').doc(uid);
         const methodRef = db.collection('users').doc(uid).collection('payment_methods').doc(methodId);
         
@@ -36,7 +67,7 @@ exports.handler = async (event) => {
         }
         const method = methodSnap.data();
         
-        // 1. Vérification du Customer ID (Logique alignée sur votre dépôt)
+        // 1. Vérification du Customer ID (Aligné sur la logique de dépôt)
         const customerId = method.customerId || null;
         if (!customerId) {
             return { 
@@ -45,26 +76,26 @@ exports.handler = async (event) => {
             };
         }
 
-        // Calcul des frais et montant net (inchangé)
-        const fee = Math.ceil(amount * 0.15); 
+        // Calcul des frais et montant net
+        const fee = Math.ceil(amount * 0.15); 
         const netAmount = amount - fee;
         if (netAmount <= 0) {
             return { statusCode: 400, body: JSON.stringify({ success: false, error: "Les frais excèdent le montant à retirer." }) };
         }
 
-        // 2. SÉCURISATION DU SOLDE VIA TRANSACTION FIRESTORE (inchangé)
+        // 2. SÉCURISATION DU SOLDE VIA TRANSACTION FIRESTORE
         let finalBalance = 0;
         await db.runTransaction(async (transaction) => {
             const userDoc = await transaction.get(userRef);
-            // ... (Logique de vérification et de débit du solde) ...
+            
             const currentBalance = userDoc.data().balance || 0;
             if (amount > currentBalance) { throw new Error("SOLDE_INSUFFISANT"); }
+            
             finalBalance = currentBalance - amount;
             transaction.update(userRef, { balance: finalBalance });
         });
         
         // 3. CRÉATION DU PAYOUT (Retrait)
-        // 🚨 CHANGEMENT MAJEUR : Utilisation de Payout.create
         const payout = await Payout.create({
             description: `Retrait - Frais ${fee} F`,
             amount: netAmount,
@@ -72,22 +103,18 @@ exports.handler = async (event) => {
             callback_url: process.env.DISBURSEMENT_CALLBACK_URL,
             merchant_reference: `WDR-${uid}-${Date.now()}`,
             
-            // 📌 Utilisation du 'receiver' (destinataire) pour les Payouts
             receiver: {
-                // FedaPay peut utiliser le Customer ID pour remplir les champs, mais il est plus sûr de passer le numéro
                 phone_number: {
                     number: method.phone,
                     country: method.countryIso
                 },
                 provider: method.operator, // L'opérateur (mtn_open, moov, etc.)
-                // On peut ajouter le nom si disponible : name: `${method.firstName} ${method.lastName}`
             },
             
-            // On peut toujours passer le customerId dans custom_metadata pour le traçage
             custom_metadata: { uid, customerId: customerId, methodId }
         });
 
-        // 4. Sauvegarde de la transaction dans Firestore (avec les IDs de Payout)
+        // 4. Sauvegarde de la transaction dans Firestore
         await db.collection('transactions').doc(String(payout.id)).set({
             uid,
             type: "external",
@@ -99,8 +126,7 @@ exports.handler = async (event) => {
             paymentMethodId: methodId,
             operator: method.operator,
             merchantReference: payout.merchant_reference,
-            // 🚨 CHANGEMENT : Utilisation de payout.id
-            transactionId: payout.id, 
+            transactionId: payout.id, // ID du Payout
             status: "pending", 
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -109,7 +135,7 @@ exports.handler = async (event) => {
             statusCode: 200,
             body: JSON.stringify({ 
                 success: true, 
-                transactionId: payout.id, // ID du Payout
+                transactionId: payout.id,
                 amount,
                 fee,
                 netAmount,
@@ -118,6 +144,20 @@ exports.handler = async (event) => {
         };
 
     } catch (error) {
-        // ... (Gestion des erreurs inchangée) ...
+        console.error("Erreur retrait:", error);
+        
+        if (error.message === "SOLDE_INSUFFISANT") {
+            return { statusCode: 400, body: JSON.stringify({ success: false, error: "Solde insuffisant pour ce retrait." }) };
+        }
+
+        let errorMessage = "Erreur interne serveur.";
+        if (error instanceof ApiConnectionError && error.errorMessage) {
+            errorMessage = `Erreur FedaPay: ${error.errorMessage}. Veuillez réessayer.`;
+        }
+
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ success: false, error: errorMessage })
+        };
     }
 };
