@@ -1,4 +1,4 @@
-open// netlify/functions/add_payment_method.js
+// netlify/functions/add_payment_method.js
 const admin = require('firebase-admin');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
@@ -30,8 +30,18 @@ const operatorMap = {
     "Free Senegal": "free_sn"
 };
 
+// Correspondance opérateurs → code ISO
+const countryMap = {
+    "MTN Bénin": "bj",
+    "Moov Bénin": "bj",
+    "Moov Togo": "tg",
+    "MTN Côte d'Ivoire": "ci",
+    "Airtel Niger": "ne",
+    "Free Senegal": "sn"
+};
+
 // Fonction pour créer ou récupérer le Customer FedaPay
-async function getOrCreateCustomer(user) {
+async function getOrCreateCustomer(user, countryIso) {
     const customerRef = db.collection('users').doc(user.uid).collection('customer_fedapay').doc('customer');
     const customerSnap = await customerRef.get();
     if (customerSnap.exists) return customerSnap.data();
@@ -46,7 +56,7 @@ async function getOrCreateCustomer(user) {
         email: emailFictif,
         phone_number: {
             number: user.phone,
-            country: user.countryIso
+            country: countryIso
         }
     });
 
@@ -74,10 +84,10 @@ exports.handler = async (event) => {
         }
 
         // Déduction automatique du code ISO
-        const countryIso = user.countryIso; // à calculer ou passer dans body
+        const countryIso = countryMap[operator] || "bj"; // défaut BJ si opérateur non trouvé
 
         // Création ou récupération du customer FedaPay
-        const customer = await getOrCreateCustomer({ uid, firstName, lastName, phone, countryIso });
+        const customer = await getOrCreateCustomer({ uid, firstName, lastName, phone }, countryIso);
 
         // Ajout du moyen de paiement
         const newMethod = {
@@ -86,7 +96,7 @@ exports.handler = async (event) => {
             firstName,
             lastName,
             phone,
-            countryIso,
+            countryIso,  // ✅ corrigé
             customerId: customer.id,
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         };
