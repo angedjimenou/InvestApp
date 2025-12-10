@@ -8,17 +8,17 @@ try { initializeApp(); } catch(e){}
 
 const db = getFirestore();
 
-export default async function handler(event) {
+export async function handler(event, context) {
     if (event.httpMethod !== "POST") {
-        return { statusCode: 405, body: "Method Not Allowed" };
+        return new Response(JSON.stringify({ error: "Method Not Allowed" }), { status: 405 });
     }
 
     const webhookSecret = process.env.FEDAPAY_WEBHOOK_SECRET;
-    if (!webhookSecret) return { statusCode: 500, body: "Missing FEDAPAY_WEBHOOK_SECRET" };
+    if (!webhookSecret) return new Response("Missing FEDAPAY_WEBHOOK_SECRET", { status: 500 });
 
     const signature = event.headers["x-fedapay-signature"];
     const timestamp = event.headers["x-fedapay-timestamp"];
-    if (!signature || !timestamp) return { statusCode: 400, body: "Missing signature headers" };
+    if (!signature || !timestamp) return new Response("Missing signature headers", { status: 400 });
 
     const rawBody = event.body;
 
@@ -30,34 +30,34 @@ export default async function handler(event) {
         .digest("hex");
 
     if (expectedSignature !== signature) {
-        return { statusCode: 401, body: "Invalid signature" };
+        return new Response("Invalid signature", { status: 401 });
     }
 
     let data;
     try { data = JSON.parse(rawBody); } catch(err) {
-        return { statusCode: 400, body: "Invalid JSON payload" };
+        return new Response("Invalid JSON payload", { status: 400 });
     }
 
     const eventType = data?.event;
     const transactionData = data?.data;
-    if (!eventType || !transactionData) return { statusCode: 400, body: "Invalid FedaPay event structure" };
+    if (!eventType || !transactionData) return new Response("Invalid FedaPay event structure", { status: 400 });
 
     const fedapayId = transactionData.id;
     const metadata = transactionData.metadata || {};
     const uid = metadata.uid;
 
-    if (!uid) return { statusCode: 400, body: "Missing userUid metadata" };
+    if (!uid) return new Response("Missing userUid metadata", { status: 400 });
 
     try {
         const userRef = db.collection("users").doc(uid);
         const userSnap = await userRef.get();
-        if (!userSnap.exists) return { statusCode: 404, body: "User not found" };
+        if (!userSnap.exists) return new Response("User not found", { status: 404 });
 
         const userData = userSnap.data();
         const txRef = db.collection("transactions").doc(String(fedapayId));
         const now = new Date();
 
-        let statusToSet = "pending"; // par défaut
+        let statusToSet = "pending";
 
         if (eventType === "transaction.approved") {
             statusToSet = "approved";
@@ -66,11 +66,13 @@ export default async function handler(event) {
                 balance: (userData.balance || 0) + amount,
                 updatedAt: now
             });
-        } else if (eventType === "transaction.declined" || eventType === "transaction.canceled") {
-            statusToSet = eventType === "transaction.declined" ? "declined" : "canceled";
+        } else if (eventType === "transaction.declined") {
+            statusToSet = "declined";
+        } else if (eventType === "transaction.canceled") {
+            statusToSet = "canceled";
         } else {
-            // Ignore autres événements pour l'instant
-            return { statusCode: 200, body: "Event ignored" };
+            // Ignorer autres événements pour l'instant
+            return new Response("Event ignored", { status: 200 });
         }
 
         // Mise à jour ou création de la transaction
@@ -92,10 +94,10 @@ export default async function handler(event) {
             }
         }, { merge: true });
 
-        return { statusCode: 200, body: "Transaction processed" };
+        return new Response(JSON.stringify({ success: true }), { status: 200 });
 
     } catch (e) {
         console.error("Webhook error:", e);
-        return { statusCode: 500, body: "Error processing transaction: " + e.message };
+        return new Response(JSON.stringify({ error: "Error processing transaction", message: e.message }), { status: 500 });
     }
 }
