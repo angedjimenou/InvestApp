@@ -47,6 +47,16 @@ button:disabled { background: #ccc; cursor: not-allowed;}
         <label for="amount">Montant à Déposer (F)</label>
         <input type="number" id="amount" placeholder="Minimum 500 F" min="500" required>
 
+        <div id="feeSummary" class="info-box" style="display: none; background-color: #fff8e1; border-color: #ffecb3;">
+            <p style="margin: 0; font-weight: 600;">Récapitulatif de la transaction :</p>
+            <ul style="list-style: none; padding: 0; margin-top: 5px; font-size: 13px;">
+                <li>Montant qui sera crédité à votre Wallet : <span id="netAmount" style="float:right; font-weight: 700; color:#27ae60;"></span></li>
+                <li>Frais de transaction FedaPay (env. 1.83%) : <span id="depositFees" style="float:right; color:#e74c3c;"></span></li>
+                <li style="border-top: 1px dashed #ccc; padding-top: 5px; margin-top: 5px;">
+                    Montant total débité de votre compte Mobile Money : <span id="chargedAmount" style="float:right; font-weight: 700; color:#4B0082;"></span>
+                </li>
+            </ul>
+        </div>
         <button type="submit" id="depositBtn" disabled>Confirmer le Dépôt</button>
     </form>
 </div>
@@ -66,6 +76,10 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+
+// --- CONSTANTE DE GESTION DES FRAIS ---
+const FEDAPAY_RATE = 0.0183; // 1.83% du montant net
+const MIN_AMOUNT = 500;
 
 auth.onAuthStateChanged(user => {
     if(!user) return window.location.href='login.html';
@@ -98,7 +112,7 @@ async function loadPaymentMethods(uid) {
             select.appendChild(option);
         });
         
-        depositBtn.disabled = false;
+        depositBtn.disabled = true; 
 
     } catch (error) {
         console.error("Erreur chargement méthodes:", error);
@@ -107,27 +121,85 @@ async function loadPaymentMethods(uid) {
     }
 }
 
+/**
+ * Calcule le montant total que le client paiera, en sachant que FedaPay applique les frais sur le montant que NOUS demandons.
+ * @param {number} netAmount Le montant que nous demandons à FedaPay (et que nous recevrons).
+ * @param {number} rate Le taux de frais (en décimal, ex: 0.0183).
+ * @returns {object} {chargedAmount, fees, netAmount}
+ */
+function calculateCharge(netAmount, rate) {
+    if (netAmount <= 0) {
+        return { chargedAmount: 0, fees: 0, netAmount: 0 };
+    }
+    
+    // Si FedaPay ajoute 1.83% au montant que nous demandons (netAmount)
+    const fees = netAmount * rate;
+    const chargedAmountFloat = netAmount + fees;
+
+    // Arrondi à l'entier supérieur pour une estimation conservatrice et claire pour l'utilisateur
+    const chargedAmount = Math.ceil(chargedAmountFloat); 
+
+    // Les frais réels que le client paie
+    const actualFees = chargedAmount - netAmount; 
+
+    return {
+        chargedAmount: chargedAmount,
+        fees: actualFees,
+        netAmount: netAmount
+    };
+}
+
+// --- ÉCOUTEUR DE SAISIE DE MONTANT ---
+document.getElementById("amount").addEventListener("input", function() {
+    // Le montant saisi est le montant net que l'utilisateur recevra
+    const netAmount = parseInt(this.value); 
+    const errorDiv = document.getElementById("error");
+    const feeSummaryDiv = document.getElementById("feeSummary");
+    const depositBtn = document.getElementById("depositBtn");
+    const methodSelected = document.getElementById("paymentMethod").value !== "";
+
+    errorDiv.style.display = "none";
+    feeSummaryDiv.style.display = "none";
+    depositBtn.disabled = true;
+
+    if (isNaN(netAmount) || netAmount < MIN_AMOUNT) {
+        return;
+    }
+
+    // Le bouton peut être activé uniquement si une méthode est sélectionnée
+    if (methodSelected) {
+        const result = calculateCharge(netAmount, FEDAPAY_RATE);
+        
+        // Affichage du résumé
+        document.getElementById("netAmount").textContent = `${netAmount.toLocaleString()} F`;
+        document.getElementById("depositFees").textContent = `${result.fees.toLocaleString()} F`;
+        document.getElementById("chargedAmount").textContent = `${result.chargedAmount.toLocaleString()} F`;
+        
+        feeSummaryDiv.style.display = "block";
+        depositBtn.disabled = false;
+    } else {
+        errorDiv.innerText = "Veuillez sélectionner un moyen de paiement.";
+        errorDiv.style.display = "block";
+    }
+});
+
+
+// --- GESTIONNAIRE DE SOUMISSION MODIFIÉ (ENVOIE LE MONTANT NET) ---
 document.getElementById("depositForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const user = auth.currentUser;
     if (!user) return;
 
-    const amount = parseInt(document.getElementById("amount").value);
+    // C'est le montant NET que nous voulons recevoir et que nous envoyons à FedaPay
+    const netAmount = parseInt(document.getElementById("amount").value); 
     const selectedOption = document.getElementById("paymentMethod").options[document.getElementById("paymentMethod").selectedIndex];
     const methodId = selectedOption.value;
     const operator = selectedOption.dataset.operator;
     const errorDiv = document.getElementById("error");
     const depositBtn = document.getElementById("depositBtn");
-    
-    errorDiv.style.display = "none";
 
-    if (!methodId || !operator) { 
-        errorDiv.innerText = "Veuillez sélectionner un moyen de paiement valide.";
-        errorDiv.style.display = "block";
-        return;
-    }
-    if (amount < 500) {
-        errorDiv.innerText = "Le montant minimum de dépôt est de 500 F.";
+    if (netAmount < MIN_AMOUNT || !methodId) {
+        errorDiv.innerText = "Veuillez vérifier le montant et la méthode de paiement.";
         errorDiv.style.display = "block";
         return;
     }
@@ -141,8 +213,9 @@ document.getElementById("depositForm").addEventListener("submit", async (e) => {
             idToken: idToken,
             uid: user.uid,
             paymentMethodId: methodId,
-            amount: amount,
-            currencyIso: "XOF" // Devise fixe pour le moment
+            // 📌 ENVOI DU MONTANT NET. FedaPay ajoutera lui-même les 1.83% au client.
+            amount: netAmount, 
+            currencyIso: "XOF"
         };
         
         const response = await fetch('/.netlify/functions/deposit_request', { 
@@ -154,7 +227,7 @@ document.getElementById("depositForm").addEventListener("submit", async (e) => {
         const result = await response.json();
 
         if (response.ok && result.success) {
-            alert(`✅ Dépôt de ${amount.toLocaleString()} F initié via ${operator.toUpperCase()}. Veuillez confirmer le paiement sur votre téléphone.`);
+            alert(`✅ Dépôt de ${netAmount.toLocaleString()} F initié. Veuillez confirmer le paiement sur votre téléphone. (Frais FedaPay appliqués au débit)`);
             window.location.href = "wallet.html"; 
         } else {
             errorDiv.innerText = result.error || "Erreur lors de la requête de dépôt (Serveur).";
