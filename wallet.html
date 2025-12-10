@@ -165,6 +165,43 @@
     .credit { color: #27ae60; }
     .debit { color: #c0392b; }
 
+    /* --- Styles pour l'affichage du Statut (AJOUTÉS) --- */
+    .status-badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-weight: 700;
+        margin-left: 8px; /* Séparateur */
+        text-transform: uppercase;
+        vertical-align: middle;
+        line-height: 1;
+    }
+
+    .status-warning { 
+        background-color: #fff3cd; 
+        color: #856404; 
+        border: 1px solid #ffeeba;
+    } /* Pending (En Attente) */
+
+    .status-success { 
+        background-color: #d4edda; 
+        color: #155724; 
+        border: 1px solid #c3e6cb;
+    } /* Approved/Completed (Réussie) */
+
+    .status-failure { 
+        background-color: #f8d7da; 
+        color: #721c24; 
+        border: 1px solid #f5c6cb;
+    } /* Canceled/Declined (Annulée/Échouée) */
+
+    .status-neutral {
+        background-color: #e2e3e5;
+        color: #383d41;
+    }
+
+
     /* --- Navbar --- */
     .navbar {
         position: fixed;
@@ -247,19 +284,59 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// Gestion des onglets
+// --- Fonctions Utilitaires pour le Statut ---
+
+/**
+ * Traduit le statut Fedapay en français pour l'affichage.
+ */
+function translateStatus(status) {
+    switch(status) {
+        case 'pending':
+            return 'En Attente';
+        case 'approved':
+        case 'confirmed':
+        case 'completed':
+            return 'Réussie';
+        case 'canceled':
+            return 'Annulée';
+        case 'declined':
+            return 'Échouée';
+        default:
+            return 'Traitement';
+    }
+}
+
+/**
+ * Assigne une classe CSS pour styliser le statut.
+ */
+function getStatusClass(status) {
+    switch(status) {
+        case 'approved':
+        case 'confirmed':
+        case 'completed':
+            return 'status-success';
+        case 'canceled':
+        case 'declined':
+            return 'status-failure';
+        case 'pending':
+            return 'status-warning';
+        default:
+            return 'status-neutral';
+    }
+}
+
+// Gestion des onglets (inchangée)
 function showTab(tab){
     document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
     document.querySelectorAll('.tx-list').forEach(d=>d.classList.remove('visible'));
     
-    // Astuce : on trouve le bouton qui a le bon onclick pour lui mettre la classe active
     const btn = Array.from(document.querySelectorAll('.tab')).find(b => b.getAttribute('onclick').includes(tab));
     if(btn) btn.classList.add('active');
     
     document.getElementById(tab).classList.add('visible');
 }
 
-// Formatage Date
+// Formatage Date (inchangé)
 function formatDate(ts){
     if(!ts) return '';
     let d;
@@ -269,11 +346,12 @@ function formatDate(ts){
     return d.toLocaleDateString('fr-FR', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
 }
 
+// Gestion de l'état d'authentification (inchangée)
 auth.onAuthStateChanged(async user => {
     if(!user) return window.location.href='login.html';
     const uid = user.uid;
 
-    // 1. Charger Solde et Infos
+    // 1. Charger Solde et Infos (inchangé)
     const userSnap = await db.collection("users").doc(uid).get();
     if(userSnap.exists){
         const data = userSnap.data();
@@ -285,26 +363,34 @@ auth.onAuthStateChanged(async user => {
         document.getElementById("phone").innerText = (data.countryCode || "") + " " + (data.phone || "");
     }
 
-    // 2. Charger les transactions (Optimisation : une seule fonction pour les deux types)
+    // 2. Charger les transactions
     loadTransactions(uid, "internal", "internal");
     loadTransactions(uid, "external", "external");
 });
 
+
+/**
+ * Lit et affiche les transactions d'un utilisateur, en gérant l'affichage du statut 
+ * pour les transactions externes (Fedapay).
+ */
 async function loadTransactions(uid, type, containerId) {
     const container = document.getElementById(containerId);
     container.innerHTML = '<p style="text-align:center; color:#999; margin-top:20px;">Chargement...</p>';
 
     try {
+        const isExternalTx = type === 'external';
+
         const snap = await db.collection("transactions")
             .where("uid", "==", uid)
             .where("type", "==", type)
-            .orderBy("timestamp", "desc")
+            // Utiliser 'fedapayUpdatedAt' pour trier les transactions externes (dernier état du webhook)
+            .orderBy(isExternalTx ? 'fedapayUpdatedAt' : 'timestamp', "desc") 
             .get();
 
         container.innerHTML = "";
 
         if(snap.empty){
-            container.innerHTML = `<p style='text-align:center;color:#999; margin-top:20px;'>Aucune transaction ${type === 'internal' ? 'interne' : 'externe'}</p>`;
+            container.innerHTML = `<p style='text-align:center;color:#999; margin-top:20px;'>Aucune transaction ${isExternalTx ? 'externe (Dépôts/Retraits)' : 'interne'}</p>`;
             return;
         }
 
@@ -314,17 +400,28 @@ async function loadTransactions(uid, type, containerId) {
             const amount = Math.abs(t.amount || 0).toLocaleString();
             const dateStr = formatDate(t.timestamp || t.date);
             
-            // Icone visuelle
-            const iconClass = isCredit ? 'fa-arrow-down' : 'fa-arrow-up'; // Fleche bas pour entrer, haut pour sortir
-            const bgClass = isCredit ? 'bg-green' : 'bg-red';
-            const amountClass = isCredit ? 'credit' : 'debit';
-            const sign = isCredit ? '+' : '-';
-
-            // Si c'est un referral, on met une icone user
+            // Récupération du statut (essentiel pour Fedapay)
+            const status = t.status || 'unknown'; 
+            
+            // --- Logique d'affichage et Iconographie ---
             let finalIcon = isCredit ? 'fa-arrow-down' : 'fa-arrow-up';
-            if(t.category === 'referral') finalIcon = 'fa-users';
-            if(t.category === 'investment') finalIcon = 'fa-chart-line';
+            let bgClass = isCredit ? 'bg-green' : 'bg-red';
+            let txDetails = t.details || (isExternalTx ? 'Opération Externe' : 'Transaction Interne');
+            
+            // Icones spécifiques
+            if(t.category === 'referral') { finalIcon = 'fa-users'; txDetails = 'Commission de Parrainage'; }
+            if(t.category === 'investment') { finalIcon = 'fa-chart-line'; txDetails = 'Revenu d\'Investissement'; }
+            // Utiliser une icône plus générale pour les opérations de portefeuille
+            if(isExternalTx) { finalIcon = 'fa-wallet'; txDetails = t.mode || 'Dépôt/Retrait'; } 
+            
+            // Déterminer l'affichage du montant et du signe
+            let amountDisplay = `${isCredit ? '+' : '-'} F ${amount}`;
 
+            // Si externe ET en attente ou annulée, on peut masquer le signe pour indiquer que le mouvement n'est pas finalisé
+            if (isExternalTx && status !== 'approved' && status !== 'confirmed' && status !== 'completed') {
+                amountDisplay = `F ${amount}`; // Montant sans signe +/-
+            }
+            
             const item = document.createElement("div");
             item.className = "tx-item";
             item.innerHTML = `
@@ -333,12 +430,15 @@ async function loadTransactions(uid, type, containerId) {
                         <i class="fas ${finalIcon}"></i>
                     </div>
                     <div class="tx-info">
-                        <div class="tx-title">${t.details || 'Transaction'}</div>
-                        <div class="tx-date">${dateStr}</div>
+                        <div class="tx-title">${txDetails}</div>
+                        <div class="tx-date">
+                            ${dateStr} 
+                            ${isExternalTx ? `<span class="status-badge ${getStatusClass(status)}">${translateStatus(status)}</span>` : ''}
+                        </div>
                     </div>
                 </div>
-                <div class="tx-amount ${amountClass}">
-                    ${sign} F ${amount}
+                <div class="tx-amount ${isCredit ? 'credit' : 'debit'}">
+                    ${amountDisplay}
                 </div>
             `;
             container.appendChild(item);
