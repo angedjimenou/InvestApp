@@ -5,15 +5,49 @@ const { initializeApp } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { FedaPay, Payout } = require('fedapay'); 
 
-// ... (Initialisation Firebase et FedaPay)
-// ...
+let db; 
+
+// ----------------------------------------------------------------------
+// 1. INITIALISATION DE FIREBASE ADMIN SDK (CORRECTION DE L'ERREUR 'app/no-app')
+// ----------------------------------------------------------------------
+if (!admin.apps.length) {
+    try {
+        const decodedServiceAccount = Buffer.from(
+            process.env.FIREBASE_ADMIN_CREDENTIALS,
+            'base64'
+        ).toString('utf8');
+        const serviceAccount = JSON.parse(decodedServiceAccount);
+        
+        initializeApp({ credential: admin.credential.cert(serviceAccount) });
+        db = getFirestore(); 
+        
+    } catch (error) {
+        console.error("Erreur critique lors de l'initialisation de Firebase Admin:", error);
+        // On ne retourne pas d'erreur ici, mais on log l'échec.
+    }
+} else {
+    try {
+        db = getFirestore();
+    } catch (e) {
+        console.error("Erreur lors de la récupération de getFirestore sur l'application existante:", e);
+    }
+}
+
+// ----------------------------------------------------------------------
+// 2. CONFIGURATION FEDAPAY
+// ----------------------------------------------------------------------
+FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY);
+FedaPay.setEnvironment('live'); 
 
 exports.handler = async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ success: false, error: "Méthode non autorisée." }) };
     }
     
-    // Assumons que le corps contient les données nécessaires
+    if (!db) {
+         return { statusCode: 500, body: JSON.stringify({ success: false, error: "Configuration Firebase Admin échouée." }) };
+    }
+
     const requestData = JSON.parse(event.body);
     const { uid, amount, phone, countryCode, operator } = requestData;
     const amountInCents = amount * 100;
@@ -23,11 +57,10 @@ exports.handler = async (event) => {
     }
 
     try {
-        const db = getFirestore();
         const userRef = db.collection('users').doc(uid);
         
         // ----------------------------------------------------------------------
-        // NOUVELLE ÉTAPE 1 : VÉRIFICATION DU PREMIER INVESTISSEMENT
+        // 3. VÉRIFICATION DU PREMIER INVESTISSEMENT ET DU SOLDE
         // ----------------------------------------------------------------------
         const userDoc = await userRef.get();
 
@@ -38,8 +71,8 @@ exports.handler = async (event) => {
         const userData = userDoc.data();
         const hasInvested = userData.firstInvestmentDone || false;
         
+        // Vérification 1 : Le retrait exige un premier investissement
         if (!hasInvested) {
-            // Empêcher le retrait si le premier investissement n'est pas fait
             return {
                 statusCode: 403,
                 body: JSON.stringify({
@@ -50,13 +83,13 @@ exports.handler = async (event) => {
             };
         }
         
-        // Vérification de la suffisance du solde AVANT l'appel FedaPay
+        // Vérification 2 : Solde suffisant
         if (userData.balance < amount) {
             throw new Error("Fonds insuffisants pour le retrait.");
         }
 
         // ----------------------------------------------------------------------
-        // ÉTAPE 2 : CRÉATION DU PAYOUT CHEZ FEDAPAY (Exposé à l'échec)
+        // 4. CRÉATION DU PAYOUT CHEZ FEDAPAY (Étape 1 de la Séquence Sécurisée)
         // ----------------------------------------------------------------------
         const payout = await Payout.create({
             amount: amountInCents,
@@ -74,19 +107,17 @@ exports.handler = async (event) => {
         });
 
         // ----------------------------------------------------------------------
-        // ÉTAPE 3 : TRANSACTION ATOMIQUE (Débit du Solde et Création de la Transaction)
+        // 5. TRANSACTION ATOMIQUE (Étape 2 de la Séquence Sécurisée : Débit et Enregistrement)
         // ----------------------------------------------------------------------
         const payoutId = String(payout.id);
-        let newBalance = userData.balance; // Initialisation avant la transaction
+        let newBalance = userData.balance; 
 
         await db.runTransaction(async (transaction) => {
-            // Re-lecture pour obtenir l'état le plus frais dans la transaction
             const freshUserDoc = await transaction.get(userRef);
             const currentBalance = freshUserDoc.data().balance || 0;
             
-            // Re-vérification finale du solde
+            // Re-vérification finale du solde pour l'atomicité
             if (currentBalance < amount) {
-                // Bien que vérifié avant, on doit s'assurer que le solde n'a pas été modifié par une autre opération
                 throw new Error("Fonds insuffisants (conflit de transaction)."); 
             }
 
@@ -111,7 +142,7 @@ exports.handler = async (event) => {
         });
 
         // ----------------------------------------------------------------------
-        // ÉTAPE 4 : RÉPONSE
+        // 6. RÉPONSE
         // ----------------------------------------------------------------------
         return {
             statusCode: 200,
