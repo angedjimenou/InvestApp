@@ -8,7 +8,7 @@ const { FedaPay, Payout, ApiConnectionError } = require('fedapay'); 
 let db; 
 
 // ----------------------------------------------------------------------
-// 1. INITIALISATION DE FIREBASE ADMIN SDK (Standard pour Netlify/Lambda)
+// 1. INITIALISATION DE FIREBASE ADMIN SDK
 // ----------------------------------------------------------------------
 if (!admin.apps.length) {
     try {
@@ -48,10 +48,10 @@ exports.handler = async (event) => {
     }
 
     try {
-        // Le front-end envoie : uid, methodId, amount
+        // Lecture des données de la requête front-end
         const { uid, methodId, amount } = JSON.parse(event.body);
 
-        // Correction de l'erreur "Données de requête manquantes"
+        // Vérification de base des données (corrige l'erreur "Données de requête manquantes")
         if (!uid || !methodId || typeof amount !== 'number' || amount < 1000) {
             return { statusCode: 400, body: JSON.stringify({ success: false, error: "Données de requête (UID, Méthode, Montant minimum 1000 F) manquantes ou invalides." }) };
         }
@@ -63,10 +63,9 @@ exports.handler = async (event) => {
         const methodRef = userRef.collection('payment_methods').doc(methodId);
         
         // ----------------------------------------------------------------------
-        // 3. VÉRIFICATIONS : Solde, Méthode, et Premier Investissement
+        // 3. VÉRIFICATIONS ET RÉCUPÉRATION DES DONNÉES
         // ----------------------------------------------------------------------
-        const userDoc = await userRef.get();
-        const methodSnap = await methodRef.get();
+        const [userDoc, methodSnap] = await Promise.all([userRef.get(), methodRef.get()]);
 
         if (!userDoc.exists) { throw new Error("Utilisateur non trouvé."); }
         if (!methodSnap.exists) { 
@@ -78,7 +77,16 @@ exports.handler = async (event) => {
 
         const hasInvested = userData.firstInvestmentDone || false;
         
-        // 3a. Vérification : Le retrait exige un premier investissement
+        // CORRECTION 1 : Récupération et vérification du customerId
+        const customerId = methodData.customerId || null;
+        if (!customerId) {
+            return { 
+                statusCode: 400, 
+                body: JSON.stringify({ success: false, error: "Customer FedaPay ID manquant pour cette méthode de paiement. Veuillez la re-ajouter ou contacter le support." }) 
+            };
+        }
+        
+        // Vérification : Le retrait exige un premier investissement
         if (!hasInvested) {
             return {
                 statusCode: 403,
@@ -90,12 +98,12 @@ exports.handler = async (event) => {
             };
         }
         
-        // 3b. Vérification du solde (préliminaire)
+        // Vérification du solde (préliminaire)
         if (userData.balance < amount) {
             throw new Error("Fonds insuffisants pour le retrait.");
         }
 
-        // Calcul des frais (réutiliser la logique front-end pour cohérence, mais ici c'est le montant transféré)
+        // Calcul des frais
         const fee = Math.ceil(amount * 0.15); 
         const netAmount = amount - fee;
         
@@ -109,11 +117,14 @@ exports.handler = async (event) => {
         // ----------------------------------------------------------------------
         const payout = await Payout.create({
             description: `Retrait ${netAmount} F (Frais: ${fee} F)`,
-            amount: netAmount, // C'est le montant NET qui doit être envoyé
+            amount: netAmount, 
             currency: { iso: 'XOF' },
             callback_url: process.env.DISBURSEMENT_CALLBACK_URL,
             merchant_reference: `WDR-${uid}-${Date.now()}`,
             
+            // CORRECTION 2 : AJOUT DE L'OBJET 'customer' (corrige l'erreur 400)
+            customer: { id: customerId }, 
+
             // Détails du destinataire (lu de la méthode de paiement)
             receiver: {
                 phone_number: {
@@ -125,7 +136,7 @@ exports.handler = async (event) => {
             
             custom_metadata: { uid, methodId }
         });
-
+        
         // ----------------------------------------------------------------------
         // 5. TRANSACTION ATOMIQUE (Séquence Sécurisée Étape 2 : Débit et Enregistrement)
         // ----------------------------------------------------------------------
@@ -138,10 +149,11 @@ exports.handler = async (event) => {
             
             // Re-vérification finale du solde (atomique)
             if (currentBalance < amount) {
+                // Ceci ne devrait plus arriver si la vérification 3b a réussi, mais c'est une sécurité
                 throw new Error("Fonds insuffisants (conflit de transaction)."); 
             }
 
-            // Débit du solde (débit du montant BRUT demandé par l'utilisateur)
+            // Débit du solde (montant BRUT)
             finalNewBalance = currentBalance - amount; 
             transaction.update(userRef, { balance: finalNewBalance });
             
@@ -151,9 +163,9 @@ exports.handler = async (event) => {
                 uid: uid,
                 type: 'external', 
                 category: 'withdrawal',
-                amount: amount, // Montant brut débité
+                amount: amount, 
                 fee: fee,
-                netAmount: netAmount, // Montant net envoyé à FedaPay
+                netAmount: netAmount, 
                 status: payout.status || 'pending', 
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 fedapayUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -185,14 +197,14 @@ exports.handler = async (event) => {
         let errorMessage = error.message;
         let httpStatus = 500;
         
-        if (error.message === "Fonds insuffisants pour le retrait.") {
+        if (error.message.includes("Fonds insuffisants")) {
             httpStatus = 400;
         } else if (error.message === 'FIRST_INVESTMENT_REQUIRED') {
             httpStatus = 403;
         } else if (error instanceof ApiConnectionError) {
             httpStatus = error.httpStatus || 500;
             // Utilisez le message d'erreur de FedaPay si disponible
-            errorMessage = error.message; 
+            errorMessage = error.errorMessage || error.message; 
         }
 
         return {
