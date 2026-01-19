@@ -23,26 +23,27 @@ exports.handler = async (event) => {
 
         const userRef = db.collection('users').doc(uid);
         const methodSnap = await userRef.collection('payment_methods').doc(methodId).get();
-        const userData = (await userRef.get()).data();
+        const userDoc = await userRef.get();
+        const userData = userDoc.data();
 
         if (!methodSnap.exists) return { statusCode: 404, body: JSON.stringify({ error: "Méthode introuvable" }) };
         const methodData = methodSnap.data();
 
         if (userData.balance < amount) throw new Error("Fonds insuffisants.");
-        if (!userData.firstInvestmentDone) return { statusCode: 403, body: JSON.stringify({ error: "Premier investissement requis." }) };
+        if (!userData.firstInvestmentDone) return { statusCode: 403, body: JSON.stringify({ error: "Investissement requis." }) };
 
         // 1. CRÉATION DU CUSTOMER À LA VOLÉE
         const customer = await Customer.create({
-            firstname: methodData.firstName,
-            lastname: methodData.lastName,
-            email: `${uid}.${Date.now()}@invest.bj`,
+            firstname: methodData.firstName || "Client",
+            lastname: methodData.lastName || "Sabot",
+            email: `${uid}.${Date.now()}@sabotinvest.site`,
             phone_number: { number: methodData.phone, country: methodData.countryIso }
         });
 
         const fee = Math.ceil(amount * 0.15); 
         const netAmount = amount - fee;
 
-        // 2. CRÉATION DU PAYOUT AVEC LE NOUVEAU CUSTOMER
+        // 2. CRÉATION DU PAYOUT (Structure corrigée)
         const payout = await Payout.create({
             description: `Retrait ${netAmount} F`,
             amount: netAmount, 
@@ -65,12 +66,9 @@ exports.handler = async (event) => {
             });
         });
 
-        return { statusCode: 200, body: JSON.stringify({ success: true, payoutId, newBalance: userData.balance - amount }) };
+        return { statusCode: 200, body: JSON.stringify({ success: true, payoutId }) };
 
     } catch (error) {
         return { statusCode: 500, body: JSON.stringify({ success: false, error: error.message }) };
-    }
-};
-        };
     }
 };
