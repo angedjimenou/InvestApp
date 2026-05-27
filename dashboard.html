@@ -10,10 +10,9 @@
         margin: 0;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         background: #f0f2f5;
-        padding-bottom: 100px; /* Espace pour la navbar */
+        padding-bottom: 100px;
     }
 
-    /* --- Header Premium --- */
     .header-bg {
         background: linear-gradient(135deg, #6a0dad, #8e44ad);
         height: 160px;
@@ -31,7 +30,6 @@
         margin-top: -40px;
     }
 
-    /* --- Carte Stats Principale --- */
     .user-card {
         background: rgba(255, 255, 255, 0.95);
         backdrop-filter: blur(10px);
@@ -68,7 +66,6 @@
     .stat-lbl { font-size: 11px; color: #888; text-transform: uppercase; margin-top: 2px; }
     .stat-box a { text-decoration: none; color: inherit; display: block; }
 
-    /* --- Liste des Produits Compacte --- */
     .section-title {
         width: 90%; max-width: 500px; margin: 0 auto 10px auto;
         font-size: 16px; font-weight: 700; color: #444;
@@ -115,7 +112,6 @@
     }
     .invest-btn:active { transform: scale(0.95); }
 
-    /* --- Navbar --- */
     .navbar {
         position: fixed;
         bottom: 10px;
@@ -136,16 +132,15 @@
     .navbar a span { font-size: 10px; margin-top: 4px; font-weight: 500; }
     .navbar a.active { opacity: 1; color: #ffd700; transform: translateY(-2px); }
 
-    /* --- Modals --- */
     .modal { display:none; position:fixed; z-index:2000; left:0; top:0; width:100%; height:100%; backdrop-filter:blur(5px); background-color: rgba(0,0,0,0.6);}
-    .modal-content { 
-        background-color: #fff; 
-        margin: 30vh auto; 
-        padding: 25px; 
-        border-radius: 20px; 
-        width: 85%; 
-        max-width: 350px; 
-        text-align: center; 
+    .modal-content {
+        background-color: #fff;
+        margin: 30vh auto;
+        padding: 25px;
+        border-radius: 20px;
+        width: 85%;
+        max-width: 350px;
+        text-align: center;
         box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         animation: popUp 0.3s ease-out;
     }
@@ -153,7 +148,7 @@
 
     .modal h3 { margin-top:0; color:#6a0dad; font-size: 18px;}
     .modal p { color: #555; font-size: 14px; margin: 15px 0 25px 0; }
-    
+
     .modal-btns { display: flex; gap: 10px; justify-content: center; }
     .modal-btn { flex: 1; padding: 10px; border: none; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 14px; }
     .btn-yes { background: #6a0dad; color: #fff; }
@@ -278,9 +273,9 @@ function toggleBalance() {
 // --- LOGIQUE D'ACHAT SÉCURISÉE ---
 confirmYesBtn.onclick = async () => {
     if (!selectedProduct) return;
-    
+
     confirmModal.style.display = "none";
-    
+
     try {
         const user = auth.currentUser;
         if (!user) {
@@ -288,20 +283,16 @@ confirmYesBtn.onclick = async () => {
             return;
         }
 
-        // 1. Récupérer le token d'authentification de l'utilisateur (Preuve d'identité)
-        const idToken = await user.getIdToken(); 
+        const idToken = await user.getIdToken();
 
-        // 2. Préparer les données
+        // FIX — Price tampering : on n'envoie plus le prix depuis le client.
+        // La Netlify Function récupère elle-même le prix réel depuis Firestore
+        // en utilisant le productId. Le client ne peut donc plus falsifier le prix.
         const payload = {
             idToken: idToken,
-            productId: selectedProduct.id,
-            productPrice: selectedProduct.price,
-            dailyRevenue: selectedProduct.dailyRevenue,
-            // Assurez-vous que durationDays est inclus, avec une valeur par défaut si besoin
-            durationDays: selectedProduct.durationDays || 30 
+            productId: selectedProduct.id
         };
-        
-        // 3. Appel de la fonction Netlify sécurisée
+
         const response = await fetch('/.netlify/functions/achat_securise', {
             method: 'POST',
             headers: {
@@ -312,12 +303,10 @@ confirmYesBtn.onclick = async () => {
 
         const result = await response.json();
 
-        // 4. Gestion de la réponse du serveur
         if (response.ok && result.success) {
             alert(`✅ Achat réussi ! Votre nouveau solde est de ${result.newBalance.toLocaleString()} F`);
-            window.location.reload(); 
+            window.location.reload();
         } else {
-            // Afficher la modale "Solde Insuffisant" si le serveur renvoie cette erreur
             if (response.status === 403 && result.error === "Solde insuffisant pour cet achat.") {
                 insufficientModal.style.display = "block";
             } else {
@@ -340,21 +329,19 @@ auth.onAuthStateChanged((user) => {
 
 async function loadUserData(user) {
     const userRef = db.collection("users").doc(user.uid);
-    userRef.onSnapshot(doc => { // Utilisation de onSnapshot pour mise à jour temps réel
+    userRef.onSnapshot(doc => {
         if(doc.exists) {
             const data = doc.data();
             currentBalance = data.balance || 0;
             if(!balanceHidden) balanceEl.innerText = `F ${currentBalance.toLocaleString()}`;
-            
+
             phoneEl.innerText = `${data.countryCode} ${data.phone}`;
 
-            // Calcul Revenu Total (Invest + Referral)
             const totalDaily = (data.daily?.invest || 0) + (data.daily?.referral || 0);
             dailyRevenueEl.innerText = `${totalDaily.toLocaleString()} F`;
         }
     });
 
-    // Compteur Investissements Actifs
     const snap = await db.collection("investments")
         .where("userId", "==", user.uid)
         .where("status", "==", "active")
@@ -364,32 +351,51 @@ async function loadUserData(user) {
 
 async function loadProducts() {
     try {
-        const snapshot = await db.collection("products").orderBy("price", "asc").get(); // Tri par prix pour dashboard
+        const snapshot = await db.collection("products").orderBy("price", "asc").get();
         productsContainer.innerHTML = "";
-        
+
         snapshot.forEach(doc => {
             const prod = doc.data();
             prod.id = doc.id;
-            
+
             const card = document.createElement("div");
             card.className = "product-card";
-            // Layout Compact sans description
-            card.innerHTML = `
-                <div class="prod-info">
-                    <div class="prod-name">${prod.name}</div>
-                    <div class="prod-price">F ${prod.price.toLocaleString()}</div>
-                    <div class="prod-details">Rev: F ${prod.dailyRevenue.toLocaleString()}/j • ${prod.durationDays}J</div>
-                </div>
-                <button class="invest-btn">Investir</button>
-            `;
-            
-            card.querySelector("button").onclick = () => {
+
+            // FIX — XSS : on construit le DOM manuellement avec textContent
+            // au lieu d'injecter les données Firestore dans innerHTML.
+            // Même si un nom de produit contient du HTML/JS malveillant,
+            // il sera affiché comme texte brut et non exécuté.
+            const prodInfo = document.createElement("div");
+            prodInfo.className = "prod-info";
+
+            const prodName = document.createElement("div");
+            prodName.className = "prod-name";
+            prodName.textContent = prod.name;
+
+            const prodPrice = document.createElement("div");
+            prodPrice.className = "prod-price";
+            prodPrice.textContent = `F ${prod.price.toLocaleString()}`;
+
+            const prodDetails = document.createElement("div");
+            prodDetails.className = "prod-details";
+            prodDetails.textContent = `Rev: F ${prod.dailyRevenue.toLocaleString()}/j • ${prod.durationDays}J`;
+
+            prodInfo.appendChild(prodName);
+            prodInfo.appendChild(prodPrice);
+            prodInfo.appendChild(prodDetails);
+
+            const btn = document.createElement("button");
+            btn.className = "invest-btn";
+            btn.textContent = "Investir";
+            btn.onclick = () => {
                 selectedProduct = prod;
-                modalTitle.innerText = prod.name;
-                modalText.innerHTML = `Prix: <b>F ${prod.price.toLocaleString()}</b><br>Revenu/J: F ${prod.dailyRevenue.toLocaleString()}`;
+                modalTitle.textContent = prod.name;
+                modalText.textContent = `Prix: F ${prod.price.toLocaleString()} — Revenu/J: F ${prod.dailyRevenue.toLocaleString()}`;
                 confirmModal.style.display = "block";
             };
 
+            card.appendChild(prodInfo);
+            card.appendChild(btn);
             productsContainer.appendChild(card);
         });
     } catch(e) {
