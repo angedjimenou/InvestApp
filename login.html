@@ -47,7 +47,7 @@
         }
 
         select {
-            width: auto;      /* largeur auto = taille exacte du texte */
+            width: auto;
             min-width: 75px;
             margin-right: 10px;
         }
@@ -91,6 +91,11 @@
             transform: scale(0.97);
         }
 
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
         .link {
             text-align: center;
             display: block;
@@ -103,6 +108,15 @@
             color: #ffaaaa;
             text-align: center;
             margin-top: 10px;
+            display: none;
+        }
+
+        /* AJOUT — avertissement tentatives */
+        #attemptsWarning {
+            color: #ffd080;
+            text-align: center;
+            font-size: 13px;
+            margin-top: 6px;
             display: none;
         }
 
@@ -155,6 +169,9 @@
         <div class="loader" id="loader"></div>
 
         <div id="loginError"></div>
+
+        <!-- AJOUT — affiché uniquement lors du rate limiting -->
+        <div id="attemptsWarning"></div>
     </form>
 
     <a href="index.html" class="link">Retour</a>
@@ -191,11 +208,65 @@
     const loginError = document.getElementById("loginError");
     const loader = document.getElementById("loader");
     const loginBtn = document.getElementById("loginBtn");
+    const attemptsWarning = document.getElementById("attemptsWarning");
+
+    // ── AJOUT : Rate limiting côté client ──────────────────────────
+    // 5 échecs → blocage avec délai exponentiel (10s, 20s, 40s… max 5min)
+    // Stocké en sessionStorage : remis à zéro à la fermeture de l'onglet.
+    const MAX_ATTEMPTS  = 5;
+    const BASE_DELAY_MS = 10000;
+
+    function getAttempts()  { return parseInt(sessionStorage.getItem("loginAttempts") || "0", 10); }
+    function getLockUntil() { return parseInt(sessionStorage.getItem("loginLockUntil") || "0", 10); }
+    function isLocked()     { return Date.now() < getLockUntil(); }
+    function remainingSec() { return Math.ceil((getLockUntil() - Date.now()) / 1000); }
+
+    function recordFailure() {
+        const n = getAttempts() + 1;
+        sessionStorage.setItem("loginAttempts", n);
+        if (n >= MAX_ATTEMPTS) {
+            const delay = BASE_DELAY_MS * Math.pow(2, n - MAX_ATTEMPTS);
+            sessionStorage.setItem("loginLockUntil", Date.now() + Math.min(delay, 300000));
+        }
+    }
+
+    function resetAttempts() {
+        sessionStorage.removeItem("loginAttempts");
+        sessionStorage.removeItem("loginLockUntil");
+    }
+
+    let lockTimer = null;
+    function startLockCountdown() {
+        clearInterval(lockTimer);
+        loginBtn.disabled = true;
+        lockTimer = setInterval(function() {
+            if (!isLocked()) {
+                clearInterval(lockTimer);
+                loginBtn.disabled = false;
+                attemptsWarning.style.display = "none";
+                return;
+            }
+            attemptsWarning.textContent = "Trop de tentatives. Réessayez dans " + remainingSec() + "s.";
+            attemptsWarning.style.display = "block";
+        }, 500);
+    }
+
+    // Si l'onglet est rechargé pendant un blocage, on relance le décompte
+    if (isLocked()) startLockCountdown();
+    // ───────────────────────────────────────────────────────────────
 
     form.addEventListener("submit", (e) => {
         e.preventDefault();
 
         loginError.style.display = "none";
+
+        // AJOUT — vérification blocage avant chaque tentative
+        if (isLocked()) {
+            loginError.textContent = "Compte temporairement bloqué. Réessayez dans " + remainingSec() + "s.";
+            loginError.style.display = "block";
+            startLockCountdown();
+            return;
+        }
 
         const code = document.getElementById("countryCode").value;
         const phone = document.getElementById("phone").value.trim();
@@ -215,11 +286,24 @@
 
         firebase.auth().signInWithEmailAndPassword(email, password)
         .then(() => {
+            resetAttempts();
             window.location.href = "dashboard.html";
         })
         .catch(() => {
+            // AJOUT — comptage de l'échec
+            recordFailure();
+            const n = getAttempts();
+            const remaining = MAX_ATTEMPTS - n;
+
             loginError.textContent = "Identifiant ou mot de passe incorrect";
             loginError.style.display = "block";
+
+            if (n >= MAX_ATTEMPTS) {
+                startLockCountdown();
+            } else if (remaining <= 2) {
+                attemptsWarning.textContent = "Attention : " + remaining + " tentative(s) restante(s).";
+                attemptsWarning.style.display = "block";
+            }
         })
         .finally(() => {
             loader.style.display = "none";
