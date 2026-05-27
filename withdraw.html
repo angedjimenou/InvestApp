@@ -211,7 +211,7 @@ async function loadPaymentMethods(uid){
             option.textContent = `${data.nickname} (${data.operator.toUpperCase().replace(/_/g,' ')})`;
             select.appendChild(option);
         });
-        withdrawBtn.disabled = true; // activation via montant
+        withdrawBtn.disabled = true;
     } catch(e){
         console.error(e);
         select.innerHTML = '<option value="">Erreur de chargement</option>';
@@ -261,7 +261,13 @@ document.getElementById("withdrawForm").addEventListener("submit", async (e)=>{
     withdrawBtn.innerText="Envoi de la demande...";
 
     try{
-        const payload = { uid: user.uid, methodId, amount };
+        // FIX — On remplace uid par idToken.
+        // Le serveur extrait lui-même l'uid depuis le token Firebase
+        // via admin.auth().verifyIdToken(idToken).
+        // Un attaquant ne peut plus usurper l'uid d'un autre utilisateur.
+        const idToken = await user.getIdToken();
+        const payload = { idToken, methodId, amount };
+
         const response = await fetch('/.netlify/functions/withdraw_request', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
