@@ -48,11 +48,30 @@ input[type="tel"] {
 .input-group input {
     width: 65%;         
 }
-/* AJOUT POUR L'ESTHÉTIQUE DEMANDÉE */
 input[type="password"],
 input[type="text"] {
     width: 100%;
     margin-bottom: 15px;
+}
+
+/* FIX — Indicateur de force du mot de passe */
+.strength-bar {
+    height: 4px;
+    border-radius: 2px;
+    background: #555;
+    margin-bottom: 8px;
+    overflow: hidden;
+}
+.strength-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 0.3s, background 0.3s;
+}
+.strength-hint {
+    font-size: 12px;
+    color: #ddd;
+    margin-bottom: 12px;
+    min-height: 16px;
 }
 
 button { 
@@ -89,23 +108,30 @@ button {
         <input type="tel" id="phone" placeholder="Numéro de téléphone" required pattern="[0-9]{8,10}" title="Entrez 8 à 10 chiffres uniquement">
     </div>
 
-    <input type="password" id="password" placeholder="Mot de passe" required>
+    <input type="password" id="password" placeholder="Mot de passe (min 8 caractères)" required>
+    
+    <!-- FIX — Indicateur de force -->
+    <div class="strength-bar">
+        <div class="strength-fill" id="strengthFill"></div>
+    </div>
+    <div class="strength-hint" id="strengthHint"></div>
+
     <input type="password" id="confirmPassword" placeholder="Confirmer le mot de passe" required>
-    <input type="text" id="inviteCode" placeholder="Code d’invitation" required>
+    <input type="text" id="inviteCode" placeholder="Code d'invitation" required>
 
     <div style="margin-bottom: 15px; font-size: 14px; color: #fff;">
         <label>
             <input type="checkbox" id="termsCheck" style="margin-right:5px;">
-            J’accepte les <a href="contrat-utilisateur.html" target="_blank" style="color:#FFD700; text-decoration:underline;">conditions d’utilisation</a>
+            J'accepte les <a href="contrat-utilisateur.html" target="_blank" style="color:#FFD700; text-decoration:underline;">conditions d'utilisation</a>
         </label>
         <br>
         <label>
             <input type="checkbox" id="privacyCheck" style="margin-right:5px;">
-            J’accepte la <a href="politique-confidentialite.html" target="_blank" style="color:#FFD700; text-decoration:underline;">politique de confidentialité</a>
+            J'accepte la <a href="politique-confidentialite.html" target="_blank" style="color:#FFD700; text-decoration:underline;">politique de confidentialité</a>
         </label>
     </div>
 
-    <button type="submit">S’inscrire</button>
+    <button type="submit">S'inscrire</button>
 </form>
 
 <a href="login.html" class="link">Déjà un compte ? Connectez-vous</a>
@@ -136,7 +162,6 @@ const inviteCodeFromUrl = urlParams.get('code');
 
 if (inviteCodeFromUrl) {
     document.getElementById("inviteCode").value = inviteCodeFromUrl;
-    // Optionnel : Désactiver le champ pour éviter la modification
     document.getElementById("inviteCode").disabled = true; 
 }
 
@@ -163,6 +188,36 @@ phoneInput.addEventListener("input", () => {
     } else {
         errorDiv.style.display = "none";
     }
+});
+
+// FIX — Indicateur de force du mot de passe
+const COLORS = ["#e74c3c", "#e67e22", "#f1c40f", "#2ecc71"];
+const LABELS = ["Très faible", "Faible", "Moyen", "Fort"];
+
+function scorePassword(pwd) {
+    let score = 0;
+    if (pwd.length >= 8)  score++;
+    if (pwd.length >= 12) score++;
+    if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score++;
+    if (/[0-9]/.test(pwd)) score++;
+    if (/[^A-Za-z0-9]/.test(pwd)) score++;
+    return Math.min(Math.floor(score / 5 * 4), 3);
+}
+
+const strengthFill = document.getElementById("strengthFill");
+const strengthHint = document.getElementById("strengthHint");
+const passInput = document.getElementById("password");
+
+passInput.addEventListener("input", () => {
+    if (!passInput.value) {
+        strengthFill.style.width = "0%";
+        strengthHint.textContent = "";
+        return;
+    }
+    const lvl = scorePassword(passInput.value);
+    strengthFill.style.width = ((lvl + 1) / 4 * 100) + "%";
+    strengthFill.style.background = COLORS[lvl];
+    strengthHint.textContent = LABELS[lvl];
 });
 
 document.getElementById("registerForm").addEventListener("submit", async (e) => {
@@ -193,20 +248,20 @@ document.getElementById("registerForm").addEventListener("submit", async (e) => 
         errorDiv.innerText = "Les mots de passe ne correspondent pas.";
         errorDiv.style.display = "block";
         submitBtn.disabled = false;
-        submitBtn.innerText = "S’inscrire";
+        submitBtn.innerText = "S'inscrire";
         return;
     }
-    // Simplification des autres validations (le serveur fera la vérification finale)
-    if(password.length < 6 || phone.length < 8 || phone.length > 10){
-        errorDiv.innerText = "Vérifiez le mot de passe (min 6 car.) et le numéro de téléphone.";
+    
+    // FIX — Minimum porté de 6 à 8 caractères
+    if(password.length < 8 || phone.length < 8 || phone.length > 10){
+        errorDiv.innerText = "Vérifiez le mot de passe (min 8 car.) et le numéro de téléphone.";
         errorDiv.style.display = "block";
         submitBtn.disabled = false;
-        submitBtn.innerText = "S’inscrire";
+        submitBtn.innerText = "S'inscrire";
         return;
     }
 
     try {
-        // --- APPEL À LA FONCTION NETLIFY SÉCURISÉE ---
         const payload = {
             phone: phone,
             countryCode: countryCode,
@@ -225,12 +280,10 @@ document.getElementById("registerForm").addEventListener("submit", async (e) => 
         const result = await response.json();
 
         if (response.ok && result.success) {
-            
-            // Connexion après l'inscription (avec l'email généré par le serveur)
             const email = countryCode + phone + "@investapp.local"; 
             await auth.signInWithEmailAndPassword(email, password);
             
-            alert(`🎉 Compte créé ! Votre code d’invitation est : ${result.myReferralCode}`);
+            alert(`🎉 Compte créé ! Votre code d'invitation est : ${result.myReferralCode}`);
             window.location.href = "dashboard.html"; 
         } else {
             errorDiv.innerText = result.error || "Erreur de connexion au serveur.";
@@ -243,7 +296,7 @@ document.getElementById("registerForm").addEventListener("submit", async (e) => 
         errorDiv.style.display = "block";
     } finally {
         submitBtn.disabled = false;
-        submitBtn.innerText = "S’inscrire";
+        submitBtn.innerText = "S'inscrire";
     }
 });
 </script>
