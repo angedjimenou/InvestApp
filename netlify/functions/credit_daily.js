@@ -171,9 +171,11 @@ exports.handler = async (event, context) => {
                 const onePercent = Math.round(investDaily * 0.01) + referralDaily;
                 if (onePercent > 0) {
                     const filleulMapRef = db.collection("filleuls").doc(userData.referrerUid);
-                    batch.update(filleulMapRef, {
+                    // FIX : utiliser set() avec merge: true au lieu de update()
+                    // Cela crée le doc s'il n'existe pas, au lieu d'échouer
+                    batch.set(filleulMapRef, {
                         [`${uid}.totalEarned`]: admin.firestore.FieldValue.increment(onePercent),
-                    });
+                    }, { merge: true });
                     console.log(`💰 [${uid}] Parrain ${userData.referrerUid} gagne ${formatFr(onePercent)} (tracking).`);
                 }
             }
@@ -230,4 +232,4 @@ exports.handler = async (event, context) => {
 //
 // ⚠️  Attention : L'heure est en UTC. Convertis ton fuseau horaire avant de modifier.
 //
-exports.handler.schedule = "10 0 * * *";
+exports.handler.schedule = "20 6 * * *";
