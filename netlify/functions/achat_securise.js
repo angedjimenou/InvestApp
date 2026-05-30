@@ -76,9 +76,10 @@ exports.handler = async (event, context) => {
         return { statusCode: 400, body: JSON.stringify({ error: "Format de requête invalide." }) };
     }
     
-    const { idToken, productId, productPrice, dailyRevenue, durationDays } = data; 
+    // FIX 1 - Price Tampering: On reçoit JUSTE l'idToken et productId, pas les prix
+    const { idToken, productId } = data; 
 
-    if (!idToken || !productId || !productPrice || !dailyRevenue || !durationDays) {
+    if (!idToken || !productId) {
         return { statusCode: 400, body: JSON.stringify({ error: "Données requises manquantes." }) };
     }
     
@@ -93,6 +94,17 @@ exports.handler = async (event, context) => {
 
     // 4. Transaction Achat & Parrainage
     try {
+        // FIX 1 - Lire le produit RÉEL depuis Firestore
+        const productSnap = await db().collection('products').doc(productId).get();
+        if (!productSnap.exists) {
+            return { statusCode: 404, body: JSON.stringify({ error: "Produit inexistant." }) };
+        }
+
+        const product = productSnap.data();
+        const productPrice = product.price;
+        const dailyRevenue = product.dailyRevenue;
+        const durationDays = product.durationDays;
+
         const referrers = await getReferrers(db, userId); 
         
         const result = await db().runTransaction(async (t) => {
@@ -128,6 +140,7 @@ exports.handler = async (event, context) => {
                 createdAt: now,
             });
 
+            // FIX 2 - Changer timestamp → createdAt
             t.set(db().collection("transactions").doc(), {
                 uid: userId,
                 type: "internal",
@@ -137,7 +150,7 @@ exports.handler = async (event, context) => {
                 source: "Balance",
                 target: "Investment",
                 details: `Achat ${productId}`,
-                timestamp: now,
+                createdAt: now,
             });
             
             // --- Bonus Parrainage ---
@@ -153,10 +166,12 @@ exports.handler = async (event, context) => {
                     "totalRevenue.referral": admin.firestore.FieldValue.increment(bonus)
                 });
 
-                t.update(db().collection("filleuls").doc(referrerUidLevel1), {
+                // FIX 3 - Changer update → set avec merge pour filleuls
+                t.set(db().collection("filleuls").doc(referrerUidLevel1), {
                     [`${userId}.totalEarned`]: admin.firestore.FieldValue.increment(bonus)
-                });
+                }, { merge: true });
 
+                // FIX 2 - Changer timestamp → createdAt
                 t.set(db().collection("transactions").doc(), {
                     uid: referrerUidLevel1,
                     type: "internal",
@@ -166,7 +181,7 @@ exports.handler = async (event, context) => {
                     source: "ReferralFirstInvest",
                     target: "Balance",
                     details: `Bonus 15% premier invest de ${userData.phone || 'filleul'}`,
-                    timestamp: now,
+                    createdAt: now,
                 });
                 
                 t.update(userRef, { firstInvestmentDone: true });
