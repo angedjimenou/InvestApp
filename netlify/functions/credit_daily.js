@@ -1,27 +1,27 @@
-// netlify/functions/creditDaily.js
-
-const admin = require('firebase-admin');
-
+// Schedule: 00 13 * * *
 // ════════════════════════════════════════════════════════════════════════════
-// CONFIGURATION — SCHEDULE CRON
+// NETLIFY SCHEDULED FUNCTION — Créditation quotidienne automatique
 // ════════════════════════════════════════════════════════════════════════════
 // 
-// Cette fonction s'exécute AUTOMATIQUEMENT selon le schedule défini ci-dessous.
+// Cette fonction s'exécute AUTOMATIQUEMENT selon le schedule défini ci-dessus.
 // 
-// SCHEDULE ACTUEL : "35 7 * * *" = 07h35 UTC chaque jour = 08h35 GMT+1 (Bénin)
+// SCHEDULE ACTUEL : "20 6 * * *" = 06h20 UTC chaque jour = 07h20 GMT+1 (Bénin)
 // 
 // FORMAT CRON : "minute heure * * *"
 // Exemples :
 //   "0 0 * * *"   = 00h00 UTC (minuit)
 //   "0 8 * * *"   = 08h00 UTC
-//   "35 7 * * *"  = 07h35 UTC ← ACTUEL (08h35 Bénin)
+//   "20 6 * * *"  = 06h20 UTC ← ACTUEL (07h20 Bénin)
+//   "35 7 * * *"  = 07h35 UTC (08h35 Bénin)
 // 
 // POUR CHANGER L'HEURE DE CRÉDITATION :
-// - Modifie la valeur de exports.handler.schedule ci-dessous
-// - Netlifie redéployera automatiquement
+// - Modifie la valeur dans le commentaire "// Schedule: X Y * * *" en haut
+// - Netlify redéployera automatiquement
 // - Pas besoin de toucher au code de la fonction elle-même
 //
 // ════════════════════════════════════════════════════════════════════════════
+
+const admin = require('firebase-admin');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Initialisation Firebase Admin
@@ -147,7 +147,7 @@ exports.handler = async (event, context) => {
                     source: "DailyInvest",
                     target: "Balance",
                     details: "Revenu journalier investissement",
-                    timestamp: now,
+                    createdAt: now,
                 });
             }
 
@@ -162,7 +162,7 @@ exports.handler = async (event, context) => {
                     source: "DailyReferral",
                     target: "Balance",
                     details: "Revenu journalier parrainage (cascade)",
-                    timestamp: now,
+                    createdAt: now,
                 });
             }
 
@@ -219,17 +219,3 @@ exports.handler = async (event, context) => {
         };
     }
 };
-
-// ════════════════════════════════════════════════════════════════════════════
-// SCHEDULE CRON — À MODIFIER ICI UNIQUEMENT
-// ════════════════════════════════════════════════════════════════════════════
-//
-// ACTUEL : "35 7 * * *" = 07h35 UTC = 08h35 GMT+1 (Bénin)
-//
-// Pour tester à 00h00 UTC : "0 0 * * *"
-// Pour tester à 08h00 UTC : "0 8 * * *"
-// Pour tester à minuit (00h00 Bénin = 23h00 UTC veille) : "0 23 * * *"
-//
-// ⚠️  Attention : L'heure est en UTC. Convertis ton fuseau horaire avant de modifier.
-//
-exports.handler.schedule = "20 6 * * *";
